@@ -125,7 +125,9 @@ def health():
     """Endpoint de salud para Render"""
     return jsonify({
         "status": "healthy",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "port": PORT,
+        "bot_webhook_url": BOT_WEBHOOK_URL
     }), 200
 
 
@@ -135,6 +137,7 @@ def index():
     return jsonify({
         "service": "Twitch EventSub Webhook Receiver",
         "status": "running",
+        "port": PORT,
         "endpoints": {
             "webhook": "/webhook/twitch",
             "health": "/health"
