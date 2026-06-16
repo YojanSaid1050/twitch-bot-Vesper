@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv/
+venv/
+ENV/
+env/
+
+# Spotify cache
+.spotify_cache
+
+# Database
+*.db
+*.sqlite
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Token cache
+.token_cache
+*.cache
+
+# Flask
+instance/
+.webassets-cache
+
+# Render (opcional)
+*.pid
