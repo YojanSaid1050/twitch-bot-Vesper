@@ -2,11 +2,12 @@
 Configuración de Gunicorn para Render
 """
 
-import multiprocessing
+import os
 
-bind = "0.0.0.0:8080"
+bind = f"0.0.0.0:{os.getenv('PORT', '8080')}"
 workers = 1
 threads = 2
 timeout = 30
 accesslog = "-"
 errorlog = "-"
+loglevel = "info"
