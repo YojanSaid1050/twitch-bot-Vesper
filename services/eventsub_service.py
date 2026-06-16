@@ -3,15 +3,13 @@ Servicio para manejar EventSub de Twitch
 """
 
 import asyncio
-import json
-import hmac
-import hashlib
 import requests
 import threading
 from flask import Flask, request, jsonify
 from typing import Optional, Dict
 
 from config import settings
+from services.notification_service import notification_service
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -33,6 +31,7 @@ class EventSubService:
         self.bot = bot
         if bot.connected_channels:
             self.channel = bot.connected_channels[0]
+        notification_service.set_bot(bot)
     
     def start_webhook_server(self):
         """Iniciar servidor webhook local"""
@@ -77,34 +76,15 @@ class EventSubService:
         async def send_notification():
             try:
                 if not self.channel:
-                    logger.warning("No hay canal disponible para enviar notificación")
                     return
                 
-                if event_type == "channel.follow":
-                    user_name = event_data.get("user_name", event_data.get("user_login", "Alguien"))
-                    message = f"🕯️ Una nueva alma se une al ritual... ¡Bienvenido {user_name}! Que la oscuridad te guíe. 🖤"
-                    await self.channel.send(message)
-                    logger.info(f"📢 Notificación de follow enviada: {user_name}")
-                
-                elif event_type == "channel.subscribe":
+                if event_type == "channel.subscribe":
                     user_name = event_data.get("user_name", event_data.get("user_login", "Alguien"))
                     tier = event_data.get("tier", "1000")
                     is_gift = event_data.get("is_gift", False)
                     
-                    tier_names = {
-                        "1000": "Tier 1",
-                        "2000": "Tier 2", 
-                        "3000": "Tier 3"
-                    }
-                    tier_name = tier_names.get(tier, "desconocido")
-                    
-                    if is_gift:
-                        message = f"🎁 {user_name} ha recibido una suscripción Tier {tier_name} como regalo! ¡Bienvenido a la cofradía! 🕯️"
-                    else:
-                        message = f"🎉 {user_name} se ha suscrito con {tier_name}! ¡Bienvenido a la cofradía del ritual! 🕯️"
-                    
-                    await self.channel.send(message)
-                    logger.info(f"📢 Notificación de sub enviada: {user_name} - {tier_name}")
+                    if not is_gift:
+                        await notification_service.on_subscribe(self.channel, user_name, tier, "sub")
                 
                 elif event_type == "channel.subscription.gift":
                     user_name = event_data.get("user_name", event_data.get("user_login", "Alguien"))
@@ -113,87 +93,58 @@ class EventSubService:
                     
                     message = f"🎁 {user_name} ha regalado {total} suscripción(es) Tier {tier}! ¡Qué generosidad ilumina el altar! 🕯️"
                     await self.channel.send(message)
-                    logger.info(f"📢 Notificación de gift sub enviada: {user_name} - {total} subs")
-                
-                elif event_type == "channel.subscription.message":
-                    user_name = event_data.get("user_name", event_data.get("user_login", "Alguien"))
-                    message_text = event_data.get("message", {}).get("text", "")
-                    
-                    if message_text:
-                        message = f"💬 {user_name} compartió un mensaje en su suscripción: '{message_text[:100]}' 🕯️"
-                        await self.channel.send(message)
-                        logger.info(f"📢 Notificación de mensaje de sub enviada: {user_name}")
                 
                 elif event_type == "channel.raid":
-                    from_broadcaster = event_data.get("from_broadcaster_user_name", event_data.get("from_name", "Alguien"))
+                    from_broadcaster = event_data.get("from_broadcaster_user_name", "Alguien")
                     viewers = event_data.get("viewers", 0)
-                    
-                    message = f"⚔️ ¡UNA HORDA LLEGA! {from_broadcaster} nos invade con {viewers} almas. ¡Preparaos para el caos ritual! 🐉"
-                    await self.channel.send(message)
-                    logger.info(f"📢 Notificación de raid enviada: {from_broadcaster} - {viewers} viewers")
+                    await notification_service.on_raid(self.channel, from_broadcaster, viewers)
                 
                 elif event_type == "channel.cheer":
-                    user_name = event_data.get("user_name", event_data.get("user_login", "Alguien"))
+                    user_name = event_data.get("user_name", "Alguien")
                     bits = event_data.get("bits", 0)
-                    message_text = event_data.get("message", "")
-                    
-                    message = f"💎 {user_name} ha lanzado {bits} bits al altar! ¡La llama se aviva con tu generosidad! 🔥"
-                    if message_text:
-                        message += f" Mensaje: '{message_text[:50]}'"
-                    
+                    message = f"💎 {user_name} ha lanzado {bits} bits al altar! 🔥"
                     await self.channel.send(message)
-                    logger.info(f"📢 Notificación de cheers enviada: {user_name} - {bits} bits")
-                
-                else:
-                    logger.debug(f"Evento no manejado: {event_type}")
                     
             except Exception as e:
                 logger.error(f"Error enviando notificación: {e}")
         
-        # Ejecutar async en el loop del bot
         if self.bot and self.bot.loop:
             asyncio.run_coroutine_threadsafe(send_notification(), self.bot.loop)
-        else:
-            logger.warning("No se pudo enviar notificación: bot loop no disponible")
     
     def subscribe_to_events(self):
-        """Suscribirse a eventos via API de Twitch"""
-        if not settings.BROADCASTER_TOKEN:
-            logger.error("No hay token para suscribirse a eventos")
+        """Suscribirse a eventos via API de Twitch (solo los que funcionan)"""
+        app_token = getattr(settings, 'APP_ACCESS_TOKEN', '')
+        
+        if not app_token:
+            logger.error("❌ No hay APP_ACCESS_TOKEN configurado")
             return
         
-        # URL pública de Render (configurar en .env)
         callback_url = settings.EVENTSUB_CALLBACK_URL
         
         if not callback_url:
-            logger.error("EVENTSUB_CALLBACK_URL no configurado")
+            logger.error("❌ EVENTSUB_CALLBACK_URL no configurado")
             return
         
-        # Lista de eventos a suscribir
-        events = [
-            ("channel.follow", 1),
-            ("channel.subscribe", 1),
-            ("channel.subscription.gift", 1),
-            ("channel.subscription.message", 1),
-            ("channel.raid", 1),
-            ("channel.cheer", 1)
-        ]
-        
         headers = {
-            "Authorization": f"Bearer {settings.BROADCASTER_TOKEN}",
+            "Authorization": f"Bearer {app_token}",
             "Client-Id": settings.CLIENT_ID,
             "Content-Type": "application/json"
         }
         
+        # Solo eventos que funcionan con App Token
+        events = [
+            ("channel.subscribe", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
+            ("channel.subscription.gift", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
+            ("channel.raid", "1", {"to_broadcaster_user_id": settings.BROADCASTER_ID})
+        ]
+        
         logger.info(f"📡 Suscribiendo a eventos via {callback_url}")
         
-        for event_type, version in events:
+        for event_type, version, condition in events:
             subscription = {
                 "type": event_type,
-                "version": str(version),
-                "condition": {
-                    "broadcaster_user_id": settings.BROADCASTER_ID
-                },
+                "version": version,
+                "condition": condition,
                 "transport": {
                     "method": "webhook",
                     "callback": f"{callback_url}/webhook/twitch",
@@ -209,13 +160,24 @@ class EventSubService:
                 )
                 
                 if response.status_code == 202:
-                    logger.info(f"✅ Suscrito a {event_type}")
+                    logger.info(f"✅ Suscrito a {event_type} (v{version})")
                 elif response.status_code == 409:
                     logger.info(f"ℹ️ Ya suscrito a {event_type}")
                 else:
-                    logger.error(f"❌ Error suscribiendo a {event_type}: {response.status_code} - {response.text}")
+                    logger.error(f"❌ Error en {event_type}: {response.status_code}")
             except Exception as e:
-                logger.error(f"Error en suscripción {event_type}: {e}")
+                logger.error(f"Error en {event_type}: {e}")
+        
+        # Iniciar polling para follows
+        if self.bot and self.bot.loop:
+            asyncio.run_coroutine_threadsafe(
+                self._start_follow_polling(), 
+                self.bot.loop
+            )
+    
+    async def _start_follow_polling(self):
+        """Iniciar polling de follows"""
+        notification_service.start_follow_polling()
     
     def stop(self):
         """Detener servidor webhook"""

@@ -2,6 +2,7 @@
 Cliente principal del bot
 """
 
+import asyncio
 from twitchio.ext import commands
 
 from config import settings
@@ -51,9 +52,11 @@ class Bot(commands.Bot):
         """Inicializar servicio de EventSub para notificaciones"""
         try:
             from services.eventsub_service import eventsub_service
+            from services.notification_service import notification_service
             
-            # Configurar el bot en el servicio
+            # Configurar el bot en los servicios
             eventsub_service.set_bot(self)
+            notification_service.set_bot(self)
             
             # Iniciar servidor webhook local
             eventsub_service.start_webhook_server()
@@ -63,13 +66,30 @@ class Bot(commands.Bot):
                 eventsub_service.subscribe_to_events()
                 logger.info("✅ EventSub configurado correctamente")
             else:
-                logger.warning("⚠️ EventSub no configurado. Las notificaciones automáticas no funcionarán.")
+                logger.warning("⚠️ EventSub no configurado. Las notificaciones automáticas de subs/raids no funcionarán.")
                 
         except ImportError as e:
             logger.warning(f"⚠️ No se pudo cargar EventSub: {e}")
         except Exception as e:
             logger.error(f"❌ Error inicializando EventSub: {e}")
     
+    async def start_follow_polling(self):
+        """Iniciar polling de follows (debe llamarse después de que el bot esté listo)"""
+        try:
+            from services.notification_service import notification_service
+
+            # Esperar un poco para asegurar que el bot está conectado
+            await asyncio.sleep(3)
+
+            # Asegurar que el canal esté disponible
+            if self.connected_channels:
+                notification_service.channel = self.connected_channels[0]
+                logger.info(f"📺 Canal asignado al servicio: {notification_service.channel.name}")
+
+            # Iniciar el polling
+            notification_service.start_follow_polling()
+        except Exception as e:
+            logger.error(f"❌ Error iniciando polling de follows: {e}")
     # ============================================
     # EVENTOS
     # ============================================
@@ -77,6 +97,9 @@ class Bot(commands.Bot):
     async def event_ready(self):
         """Evento cuando el bot está listo"""
         await self.event_handler.on_ready()
+        
+        # Iniciar polling de follows después de que el bot esté conectado
+        await self.start_follow_polling()
     
     async def event_message(self, message):
         """Evento cuando se recibe un mensaje"""
@@ -126,6 +149,12 @@ class Bot(commands.Bot):
         try:
             from services.eventsub_service import eventsub_service
             eventsub_service.stop()
+        except:
+            pass
+        
+        try:
+            from services.notification_service import notification_service
+            notification_service.stop_polling()
         except:
             pass
         

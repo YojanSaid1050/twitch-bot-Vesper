@@ -15,7 +15,7 @@ app = Flask(__name__)
 # Configuración desde variables de entorno
 BOT_WEBHOOK_URL = os.getenv("BOT_WEBHOOK_URL", "http://localhost:5001/webhook")
 TWITCH_SECRET = os.getenv("TWITCH_WEBHOOK_SECRET", "")
-PORT = int(os.getenv("PORT", 8080))
+PORT = int(os.getenv("PORT", 10000))
 
 
 def verify_signature(message: str, signature: str) -> bool:

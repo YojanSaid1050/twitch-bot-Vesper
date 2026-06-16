@@ -28,6 +28,9 @@ class Settings:
         self.BROADCASTER_TOKEN = os.getenv("BROADCASTER_TOKEN", "").replace("oauth:", "")
         self.BROADCASTER_REFRESH_TOKEN = os.getenv("BROADCASTER_REFRESH_TOKEN", "")
         
+        # App Access Token (para EventSub)
+        self.APP_ACCESS_TOKEN = os.getenv("APP_ACCESS_TOKEN", "")
+        
         # IDs y cliente
         self.CLIENT_ID = os.getenv("CLIENT_ID", "")
         self.CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
@@ -46,6 +49,7 @@ class Settings:
         self.EVENTSUB_CALLBACK_URL = os.getenv("EVENTSUB_CALLBACK_URL", "")
         self.TWITCH_WEBHOOK_SECRET = os.getenv("TWITCH_WEBHOOK_SECRET", "")
         self.BOT_WEBHOOK_PORT = int(os.getenv("BOT_WEBHOOK_PORT", "5001"))
+        self.BOT_WEBHOOK_URL = os.getenv("BOT_WEBHOOK_URL", "http://localhost:5001/webhook")
         
         # Headers para API (se actualizarán dinámicamente)
         self._update_headers()
@@ -78,6 +82,11 @@ class Settings:
         self.BROADCASTER_TOKEN = new_token
         self._update_headers()
         self._save_to_env("BROADCASTER_TOKEN", f"oauth:{new_token}")
+    
+    def update_app_token(self, new_token: str):
+        """Actualizar App Access Token"""
+        self.APP_ACCESS_TOKEN = new_token
+        self._save_to_env("APP_ACCESS_TOKEN", new_token)
     
     def _save_to_env(self, key: str, value: str):
         """Guardar cambio en .env (opcional, para persistencia)"""
@@ -123,6 +132,10 @@ class Settings:
             print("⚠️ BOT_REFRESH_TOKEN no configurado. Los tokens expirarán cada 4 horas.")
         if not self.BROADCASTER_REFRESH_TOKEN:
             print("⚠️ BROADCASTER_REFRESH_TOKEN no configurado. Los tokens expirarán cada 4 horas.")
+        
+        # App Token es opcional (solo para EventSub)
+        if not self.APP_ACCESS_TOKEN:
+            print("⚠️ APP_ACCESS_TOKEN no configurado. Las notificaciones de subs/raids no funcionarán.")
         
         # EventSub es opcional
         if not self.EVENTSUB_CALLBACK_URL:
