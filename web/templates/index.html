@@ -511,12 +511,12 @@ function updateDashboardFromData(data) {
     
     if (currentLive) {
         dot.className = 'status-dot online';
-        statusText.textContent = '🟢 En Vivo';
+        statusText.textContent = ' En Vivo';
         statusBadge.textContent = '🟢 EN VIVO';
         statusBadge.style.background = 'var(--color-success)';
     } else {
         dot.className = 'status-dot offline';
-        statusText.textContent = '🔴 Desconectado';
+        statusText.textContent = ' Desconectado';
         statusBadge.textContent = '🔴 Offline';
         statusBadge.style.background = 'var(--color-danger)';
     }
