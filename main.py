@@ -71,13 +71,16 @@ def main():
     logger.info("🕯️ Iniciando VesperBot...")
     log_service.add_log('info', 'Iniciando VesperBot...', 'main')
 
-    # ===== NUEVO: CREAR Y CONFIGURAR EL EVENT LOOP =====
+    # ===== CREAR Y CONFIGURAR EL EVENT LOOP DE MANERA SEGURA =====
     try:
-        loop = asyncio.get_event_loop()
+        # Intentar obtener el loop actual (si existe)
+        loop = asyncio.get_running_loop()
     except RuntimeError:
-        # Si no hay loop, crear uno nuevo
+        # No hay loop corriendo, crear uno nuevo y establecerlo
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        logger.info("✅ Event loop creado y establecido para el hilo principal")
+        log_service.add_log('info', 'Event loop creado para el hilo principal', 'main')
     
     # Iniciar dashboard en hilo separado
     dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)

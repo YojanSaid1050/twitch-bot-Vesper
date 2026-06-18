@@ -4,7 +4,7 @@ Servicio para integración con Spotify
 
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
-from typing import Optional, Dict, Set, List
+from typing import Optional, Dict, List
 from collections import deque
 import threading
 import time
@@ -43,20 +43,26 @@ class SpotifyService:
             log_service.add_log('warning', 'Spotify no configurado (faltan credenciales)', 'spotify_service')
     
     def _authenticate(self):
-        """Autenticar con Spotify"""
+        """Autenticar con Spotify sin abrir navegador (usando caché)"""
         try:
             self.sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
                 client_id=self.client_id,
                 client_secret=self.client_secret,
                 redirect_uri=self.redirect_uri,
                 scope=self.scope,
-                cache_path=".spotify_cache"
+                cache_path=".spotify_cache",
+                open_browser=False  # <--- CLAVE: no abrir navegador
             ))
-            logger.info("✅ Autenticado con Spotify")
-            log_service.add_log('info', 'Autenticado con Spotify', 'spotify_service')
+            logger.info("✅ Autenticado con Spotify (usando caché)")
+            log_service.add_log('info', 'Autenticado con Spotify (usando caché)', 'spotify_service')
         except Exception as e:
-            logger.error(f"❌ Error autenticando con Spotify: {e}")
-            log_service.add_log('error', f'Error autenticando con Spotify: {e}', 'spotify_service')
+            # Manejar el error específico de "Server listening on localhost"
+            if "Server listening on localhost" in str(e):
+                logger.warning("⚠️ Spotify necesita autenticación inicial. Asegúrate de tener un token válido en .spotify_cache.")
+                log_service.add_log('warning', 'Spotify necesita autenticación inicial. Usa el script de generación de tokens.', 'spotify_service')
+            else:
+                logger.error(f"❌ Error autenticando con Spotify: {e}")
+                log_service.add_log('error', f'Error autenticando con Spotify: {e}', 'spotify_service')
             self.sp = None
     
     def _start_monitoring(self):
@@ -518,6 +524,7 @@ class SpotifyService:
             logger.error(f"Error en seek: {e}")
             log_service.add_log('error', f'Error en seek: {e}', 'spotify_service')
             return False
+
 
 # Instancia global
 spotify_service = SpotifyService()
