@@ -49,7 +49,7 @@ class SpotifyService:
             log_service.add_log('warning', 'Spotify no configurado (faltan credenciales)', 'spotify_service')
     
     def _authenticate(self):
-        """Autenticar con Spotify usando refresh token desde variables de entorno"""
+        """Autenticar con Spotify usando refresh token desde settings"""
         try:
             refresh_token = settings.SPOTIFY_REFRESH_TOKEN
             
@@ -612,31 +612,6 @@ class SpotifyService:
             logger.error(f"Error en seek: {e}")
             log_service.add_log('error', f'Error en seek: {e}', 'spotify_service')
             return False
-    
-    def remove_from_queue_by_position(self, position: int) -> Optional[str]:
-        """Eliminar una canción de la cola por posición"""
-        if position < 1 or position > len(self.queue_tracks):
-            return None
-        
-        track_id = self.queue_tracks[position - 1]
-        track_name = self.queue_info.get(track_id, {}).get('name', 'Canción')
-        
-        self.queue_tracks.pop(position - 1)
-        if track_id in self.queue_info:
-            del self.queue_info[track_id]
-        
-        logger.info(f"🗑️ Canción eliminada de la cola: {track_name}")
-        log_service.add_log('info', f'Canción eliminada de la cola: {track_name}', 'spotify_service')
-        return track_name
-    
-    def clear_queue(self) -> int:
-        """Limpiar toda la cola"""
-        count = len(self.queue_tracks)
-        self.queue_tracks.clear()
-        self.queue_info.clear()
-        logger.info(f"🧹 Cola limpiada: {count} canciones eliminadas")
-        log_service.add_log('info', f'Cola limpiada: {count} canciones', 'spotify_service')
-        return count
 
 
 # Instancia global

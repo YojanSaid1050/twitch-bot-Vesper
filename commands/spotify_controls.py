@@ -35,55 +35,6 @@ def setup_spotify_controls(bot):
             if remaining > 0:
                 await ctx.send(f"  ... y {remaining} cantos más. Usa !queue para ver todos en el susurro privado.")
     
-    @bot.command(name="remove", aliases=["remover", "del"])
-    async def remove_from_queue(ctx: commands.Context):
-        """Eliminar canción de la cola por posición (solo mods, VIP y streamer)"""
-        user_level = permission_checker.get_user_level(ctx.message)
-        if user_level < PermissionLevel.VIP:
-            await ctx.send("🕯️ Solo los elegidos (VIP, mods o el invocador) pueden retirar melodías de la cola.")
-            return
-        
-        if not spotify_service.sp:
-            await ctx.send("❌ El altar de Spotify no está invocado.")
-            return
-        
-        parts = ctx.message.content.split()
-        
-        if len(parts) < 2:
-            await ctx.send("🕯️ Uso: !remove <número de posición>")
-            await ctx.send("🎵 Ejemplo: !remove 3 (elimina el canto en posición 3)")
-            return
-        
-        try:
-            position = int(parts[1])
-            removed = spotify_service.remove_from_queue_by_position(position)
-            
-            if removed:
-                await ctx.send(f"🗑️ {removed} ha sido borrada de la memoria del ritual.")
-            else:
-                await ctx.send(f"❌ Posición {position} inválida. La cola tiene {spotify_service.get_queue_count()} cantos.")
-        except ValueError:
-            await ctx.send("❌ Usa un número válido. Ejemplo: !remove 2")
-    
-    @bot.command(name="clearqueue", aliases=["limpiarcola", "clearcola"])
-    async def clear_queue(ctx: commands.Context):
-        """Limpiar toda la cola de Spotify (solo mods, VIP y streamer)"""
-        user_level = permission_checker.get_user_level(ctx.message)
-        if user_level < PermissionLevel.VIP:
-            await ctx.send("🕯️ Solo los elegidos (VIP, mods o el invocador) pueden purificar la cola del ritual.")
-            return
-        
-        if not spotify_service.sp:
-            await ctx.send("❌ El altar de Spotify no está invocado.")
-            return
-        
-        count = spotify_service.clear_queue()
-        
-        if count > 0:
-            await ctx.send(f"🧹 {count} melodías han sido devueltas al silencio. El altar respira... 🕯️")
-        else:
-            await ctx.send("🕯️ La cola ya estaba vacía... no hay nada que limpiar.")
-    
     @bot.command(name="volumen", aliases=["volume", "vol"])
     async def set_volume(ctx: commands.Context):
         """Ajustar volumen de Spotify (solo mods, VIP y streamer)"""
