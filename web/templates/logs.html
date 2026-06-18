@@ -12,8 +12,8 @@
             <button onclick="clearLogs()" class="btn-danger btn-sm">
                 <i class="fas fa-trash"></i> Limpiar
             </button>
-            <button onclick="refreshLogs()" class="btn-primary btn-sm">
-                <i class="fas fa-sync"></i> Refrescar
+            <button onclick="refreshLogs()" class="btn-primary btn-sm" style="color: #fff !important;">
+                <i class="fas fa-sync" style="color: #fff !important;"></i> Refrescar
             </button>
             <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary);">
                 Auto-refresh
@@ -50,8 +50,8 @@
                 </select>
             </div>
             <div style="display: flex; align-items: flex-end;">
-                <button onclick="applyFilters()" class="btn-primary btn-sm">
-                    <i class="fas fa-filter"></i> Aplicar
+                <button onclick="applyFilters()" class="btn-primary btn-sm" style="color: #fff !important;">
+                    <i class="fas fa-filter" style="color: #fff !important;"></i> Aplicar
                 </button>
             </div>
         </div>
@@ -85,6 +85,17 @@
     .log-level-WARNING td:first-child { color: #f59e0b; }
     .log-level-ERROR td:first-child { color: #ef4444; }
     .log-level-CRITICAL td:first-child { color: #dc2626; font-weight: bold; }
+    
+    /* Forzar color blanco en iconos de botones primary */
+    .btn-primary i {
+        color: #fff !important;
+    }
+    .btn-primary:hover i {
+        color: #fff !important;
+    }
+    .btn-primary:active i {
+        color: #fff !important;
+    }
 </style>
 
 <script>
