@@ -34,6 +34,18 @@
             font-size: 12px;
             font-weight: 600;
         }
+        /* Estado del bot con emoji */
+        .status-emoji {
+            font-size: 16px;
+            line-height: 1;
+            transition: color 0.3s ease;
+        }
+        .status-emoji.online {
+            color: var(--color-success);
+        }
+        .status-emoji.offline {
+            color: var(--color-danger);
+        }
         /* Sidebar responsive improvements */
         @media (max-width: 768px) {
             .sidebar {
@@ -60,7 +72,7 @@
             }
         }
         @media (max-width: 480px) {
-            .bot-status span {
+            .bot-status #status-text {
                 display: none;
             }
         }
@@ -136,8 +148,8 @@
                 </div>
                 <div class="header-right">
                     <span class="bot-status" id="bot-status">
-                        <i class="fas fa-circle status-dot"></i>
-                        <span>Conectado</span>
+                        <span class="status-emoji online" id="status-emoji">🟢</span>
+                        <span id="status-text">Conectado</span>
                     </span>
                 </div>
             </header>

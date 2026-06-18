@@ -217,16 +217,20 @@ input[type=number] {
     color: var(--text-secondary);
 }
 
-.status-dot {
-    font-size: 8px;
+/* ============================================
+   STATUS EMOJI (para estado del bot)
+============================================ */
+.status-emoji {
+    font-size: 16px;
+    line-height: 1;
+    transition: color 0.3s ease;
+}
+
+.status-emoji.online {
     color: var(--color-success);
 }
 
-.status-dot.online {
-    color: var(--color-success);
-}
-
-.status-dot.offline {
+.status-emoji.offline {
     color: var(--color-danger);
 }
 
@@ -1354,7 +1358,7 @@ input[type=number] {
         grid-template-columns: 1fr;
     }
     
-    .bot-status span {
+    .bot-status #status-text {
         display: none;
     }
     

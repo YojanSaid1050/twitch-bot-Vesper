@@ -370,26 +370,29 @@ function truncate(text, length = 50) {
 async function updateBotStatus() {
     try {
         const data = await dashboardAPI.getData();
-        const dot = document.querySelector('.status-dot');
-        const text = document.querySelector('.bot-status span');
+        const emoji = document.getElementById('status-emoji');
+        const text = document.getElementById('status-text');
         
-        // Verificar si el bot está conectado (no si el stream está en vivo)
-        // connected = true significa que el bot responde y está conectado a Twitch
+        // Verificar si el bot está conectado
         if (data.status && data.status.connected) {
-            dot.className = 'status-dot online';
+            emoji.textContent = '🟢';
+            emoji.className = 'status-emoji online';
             text.textContent = 'Conectado';
         } else {
-            dot.className = 'status-dot offline';
+            emoji.textContent = '🔴';
+            emoji.className = 'status-emoji offline';
             text.textContent = 'Desconectado';
         }
         
         return data;
     } catch (error) {
         console.error('Error actualizando estado:', error);
-        // En caso de error, mostrar como desconectado
-        const dot = document.querySelector('.status-dot');
-        const text = document.querySelector('.bot-status span');
-        if (dot) dot.className = 'status-dot offline';
+        const emoji = document.getElementById('status-emoji');
+        const text = document.getElementById('status-text');
+        if (emoji) {
+            emoji.textContent = '🔴';
+            emoji.className = 'status-emoji offline';
+        }
         if (text) text.textContent = 'Desconectado';
     }
 }
