@@ -109,12 +109,12 @@ class TokenManager:
                 log_service.add_log('info', f'Token del bot refrescado. Expira en {expires_in // 60} min', 'token_manager')
                 return True
             else:
-                logger.error(f"Error refrescando token del bot: {response.status_code} - {response.text}")
-                log_service.add_log('error', f'Error refrescando token del bot: {response.status_code}', 'token_manager')
+                logger.error(f"❌ Error refrescando token del bot: {response.status_code} - {response.text}")
+                log_service.add_log('error', f'Error refrescando token del bot: {response.status_code} - {response.text[:100]}', 'token_manager')
                 return False
                 
         except Exception as e:
-            logger.error(f"Error refrescando token del bot: {e}")
+            logger.error(f"❌ Error refrescando token del bot: {e}")
             log_service.add_log('error', f'Error refrescando token del bot: {e}', 'token_manager')
             return False
     
@@ -158,12 +158,12 @@ class TokenManager:
                 log_service.add_log('info', f'Token del streamer refrescado. Expira en {expires_in // 60} min', 'token_manager')
                 return True
             else:
-                logger.error(f"Error refrescando token del streamer: {response.status_code} - {response.text}")
-                log_service.add_log('error', f'Error refrescando token del streamer: {response.status_code}', 'token_manager')
+                logger.error(f"❌ Error refrescando token del streamer: {response.status_code} - {response.text}")
+                log_service.add_log('error', f'Error refrescando token del streamer: {response.status_code} - {response.text[:100]}', 'token_manager')
                 return False
                 
         except Exception as e:
-            logger.error(f"Error refrescando token del streamer: {e}")
+            logger.error(f"❌ Error refrescando token del streamer: {e}")
             log_service.add_log('error', f'Error refrescando token del streamer: {e}', 'token_manager')
             return False
     
@@ -195,12 +195,12 @@ class TokenManager:
                 log_service.add_log('info', 'App Access Token refrescado', 'token_manager')
                 return True
             else:
-                logger.error(f"Error refrescando App Access Token: {response.status_code}")
+                logger.error(f"❌ Error refrescando App Access Token: {response.status_code}")
                 log_service.add_log('error', f'Error refrescando App Access Token: {response.status_code}', 'token_manager')
                 return False
                 
         except Exception as e:
-            logger.error(f"Error refrescando App Access Token: {e}")
+            logger.error(f"❌ Error refrescando App Access Token: {e}")
             log_service.add_log('error', f'Error refrescando App Access Token: {e}', 'token_manager')
             return False
     
@@ -222,7 +222,6 @@ class TokenManager:
             return False
         
         try:
-            # Usar el endpoint de Spotify para refrescar el token
             response = requests.post(
                 "https://accounts.spotify.com/api/token",
                 data={
@@ -239,10 +238,8 @@ class TokenManager:
                 self.spotify_access_token = data.get("access_token")
                 expires_in = data.get("expires_in", 3600)
                 
-                # Si devuelve un nuevo refresh token (raro), actualizarlo
                 if "refresh_token" in data:
                     self.spotify_refresh_token = data["refresh_token"]
-                    # No podemos actualizar variables de entorno, pero lo guardamos en memoria
                 
                 self.spotify_token_expires_at = datetime.now() + timedelta(seconds=expires_in)
                 
@@ -250,12 +247,12 @@ class TokenManager:
                 log_service.add_log('info', f'Token de Spotify refrescado. Expira en {expires_in // 60} min', 'token_manager')
                 return True
             else:
-                logger.error(f"Error refrescando token de Spotify: {response.status_code} - {response.text}")
+                logger.error(f"❌ Error refrescando token de Spotify: {response.status_code} - {response.text}")
                 log_service.add_log('error', f'Error refrescando token de Spotify: {response.status_code}', 'token_manager')
                 return False
                 
         except Exception as e:
-            logger.error(f"Error refrescando token de Spotify: {e}")
+            logger.error(f"❌ Error refrescando token de Spotify: {e}")
             log_service.add_log('error', f'Error refrescando token de Spotify: {e}', 'token_manager')
             return False
     
@@ -264,7 +261,6 @@ class TokenManager:
         Obtener el access token de Spotify. Si no existe o está expirado, lo refresca.
         Devuelve el access token o None si falla.
         """
-        # Si no hay token o está expirado, refrescar
         if not self.spotify_access_token or not self.spotify_token_expires_at or datetime.now() >= self.spotify_token_expires_at:
             if not self.refresh_spotify_token():
                 return None
@@ -341,13 +337,11 @@ class TokenManager:
         
         # Spotify: si tenemos refresh token, intentar obtener estado
         if self.spotify_refresh_token:
-            # Si tenemos access token en memoria y no ha expirado, considerarlo válido
             if self.spotify_access_token and self.spotify_token_expires_at and datetime.now() < self.spotify_token_expires_at:
                 status["spotify"]["valid"] = True
                 status["spotify"]["expires_at"] = self.spotify_token_expires_at
                 status["spotify"]["expires_in"] = (self.spotify_token_expires_at - datetime.now()).total_seconds()
             else:
-                # Intentar refrescar para obtener estado
                 if self.refresh_spotify_token():
                     status["spotify"]["valid"] = True
                     status["spotify"]["expires_at"] = self.spotify_token_expires_at
@@ -494,11 +488,19 @@ class TokenManager:
     # ============================================
     
     def refresh_all_tokens(self):
-        """Refrescar todos los tokens (Twitch + Spotify)"""
+        """Refrescar todos los tokens (Twitch + Spotify) con logs detallados"""
+        logger.info("🔄 Iniciando refresh de todos los tokens...")
+        
         bot_ok = self.refresh_bot_token()
         broadcaster_ok = self.refresh_broadcaster_token()
         app_ok = self.refresh_app_token()
         spotify_ok = self.refresh_spotify_token()
+        
+        # Reporte detallado
+        logger.info(f"  - Bot token: {'✅' if bot_ok else '❌'}")
+        logger.info(f"  - Broadcaster token: {'✅' if broadcaster_ok else '❌'}")
+        logger.info(f"  - App token: {'✅' if app_ok else '❌'}")
+        logger.info(f"  - Spotify token: {'✅' if spotify_ok else '❌'}")
         
         if bot_ok and broadcaster_ok and app_ok and spotify_ok:
             logger.info("✅ Todos los tokens refrescados correctamente")
@@ -506,10 +508,13 @@ class TokenManager:
             self._tokens_ready.set()
         else:
             logger.warning("⚠️ Algunos tokens no pudieron refrescarse")
-            log_service.add_log('warning', 'Algunos tokens no pudieron refrescarse', 'token_manager')
+            log_service.add_log('warning', f'Algunos tokens no pudieron refrescarse (bot={bot_ok}, broadcaster={broadcaster_ok}, app={app_ok}, spotify={spotify_ok})', 'token_manager')
             # Si al menos el bot y broadcaster son válidos, consideramos que estamos listos
             if self.are_tokens_valid():
                 self._tokens_ready.set()
+            else:
+                logger.error("❌ No se pudieron refrescar los tokens esenciales (bot o broadcaster).")
+                log_service.add_log('critical', 'No se pudieron refrescar los tokens del bot o streamer', 'token_manager')
     
     def start_auto_refresh(self, wait_for_tokens: bool = True):
         """
