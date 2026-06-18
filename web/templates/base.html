@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}VesperBot Dashboard{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Asegurar que los botones sean visibles */
+        .btn-icon {
+            color: var(--text-primary) !important;
+        }
+        .btn-icon.btn-success {
+            color: #fff !important;
+        }
+        .btn-icon.btn-danger {
+            color: #fff !important;
+        }
+        .btn-icon.btn-info {
+            color: #fff !important;
+            background: var(--color-info);
+        }
+        .btn-icon.btn-info:hover {
+            opacity: 0.8;
+        }
+        .badge {
+            background: var(--color-accent);
+            color: #fff;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        /* Sidebar responsive improvements */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 72px;
+            }
+            .sidebar-brand .brand-text,
+            .menu-item a span,
+            .sidebar-footer .logout-btn span {
+                display: none;
+            }
+            .sidebar-brand {
+                justify-content: center;
+                padding: 0 0 16px 0;
+            }
+            .menu-item a {
+                justify-content: center;
+                padding: 10px;
+            }
+            .main-content {
+                padding: 16px;
+            }
+            .top-header h1 {
+                font-size: 20px;
+            }
+        }
+        @media (max-width: 480px) {
+            .bot-status span {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="sidebar-brand">
+                <span class="brand-icon" id="brand-icon">🕯️</span>
+                <span class="brand-text">VesperBot</span>
+            </div>
+            
+            <ul class="sidebar-menu">
+                <li class="menu-item {% if active_page == 'index' %}active{% endif %}">
+                    <a href="/">
+                        <i class="fas fa-home"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="menu-item {% if active_page == 'commands' %}active{% endif %}">
+                    <a href="/commands">
+                        <i class="fas fa-terminal"></i>
+                        <span>Comandos</span>
+                    </a>
+                </li>
+                <li class="menu-item {% if active_page == 'spotify' %}active{% endif %}">
+                    <a href="/spotify">
+                        <i class="fas fa-music"></i>
+                        <span>Spotify</span>
+                    </a>
+                </li>
+                <li class="menu-item {% if active_page == 'moderation' %}active{% endif %}">
+                    <a href="/moderation">
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Moderación</span>
+                    </a>
+                </li>
+                <li class="menu-item {% if active_page == 'stats' %}active{% endif %}">
+                    <a href="/stats">
+                        <i class="fas fa-chart-bar"></i>
+                        <span>Estadísticas</span>
+                    </a>
+                </li>
+                <li class="menu-item {% if active_page == 'logs' %}active{% endif %}">
+                    <a href="/logs">
+                        <i class="fas fa-list-ul"></i>
+                        <span>Logs</span>
+                    </a>
+                </li>
+                <li class="menu-item {% if active_page == 'settings' %}active{% endif %}">
+                    <a href="/settings">
+                        <i class="fas fa-cog"></i>
+                        <span>Configuración</span>
+                    </a>
+                </li>
+            </ul>
+            
+            <div class="sidebar-footer">
+                <a href="/logout" class="logout-btn">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Cerrar Sesión</span>
+                </a>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-header">
+                <div class="header-left">
+                    <h1>{% block header %}Dashboard{% endblock %}</h1>
+                </div>
+                <div class="header-right">
+                    <span class="bot-status" id="bot-status">
+                        <i class="fas fa-circle status-dot"></i>
+                        <span>Conectado</span>
+                    </span>
+                </div>
+            </header>
+
+            <div class="content-body">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+
+    <!-- Cargar primero dashboard.js (define dashboardAPI) -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+    
+    <!-- Cargar icono guardado -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        fetch('/api/settings/bot-icon')
+            .then(res => res.json())
+            .then(data => {
+                if (data.icon) {
+                    const iconElement = document.getElementById('brand-icon');
+                    if (iconElement) {
+                        iconElement.textContent = data.icon;
+                    }
+                }
+            })
+            .catch(() => {});
+    });
+    </script>
+    
+    <!-- Luego cargar los scripts específicos de cada página -->
+    {% block scripts %}{% endblock %}
+</body>
+</html>

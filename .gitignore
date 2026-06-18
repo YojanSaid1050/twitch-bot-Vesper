@@ -42,3 +42,6 @@ instance/
 
 # Render
 *.pid
+
+# Dashboard
+web/static/img/

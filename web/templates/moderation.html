@@ -1,0 +1,1572 @@
+{% extends "base.html" %}
+
+{% block title %}VesperBot - Moderación{% endblock %}
+{% block header %}Configuración de Moderación{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <!-- Palabras Prohibidas -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-ban"></i>
+            <h3>Palabras Prohibidas</h3>
+        </div>
+        <div class="card-body">
+            <div class="link-info" style="margin-bottom: 12px;">
+                <p style="color: var(--text-secondary); font-size: 13px; margin: 0;">
+                    <i class="fas fa-info-circle"></i>
+                    Las palabras prohibidas usan el mismo sistema de advertencias que los enlaces.
+                    <br>
+                    <small style="color: var(--text-muted);">
+                        <span id="banned-words-warning-text">Advertencias: 1-2 = aviso, 3 = timeout (10 min), 4+ = ban (14 días)</span>
+                    </small>
+                </p>
+            </div>
+            <form id="add-word-form" class="form-inline">
+                <input type="text" id="word-input" placeholder="Palabra a prohibir" class="form-control">
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-plus"></i> Añadir
+                </button>
+            </form>
+            <div id="banned-words-list" class="tags-list" style="margin-top:12px;">
+                <span class="tag">No hay palabras prohibidas</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Enlaces Permitidos -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-link"></i>
+            <h3>Enlaces Permitidos</h3>
+        </div>
+        <div class="card-body">
+            <div class="link-info">
+                <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">
+                    <i class="fas fa-info-circle"></i>
+                    Los enlaces que no estén en esta lista serán bloqueados automáticamente.
+                    <br>
+                    <span id="link-warning-text">
+                        <strong>Sistema de advertencias:</strong> 
+                        <span id="warning-system-description">Cargando...</span>
+                    </span>
+                    <br>
+                    <small>Dominios permitidos por defecto: <strong>spotify.com, open.spotify.com, clips.twitch.tv</strong></small>
+                    <br>
+                    <small style="color: var(--text-muted);">Puedes añadir más dominios usando el formulario de abajo.</small>
+                </p>
+            </div>
+            <form id="add-link-form" class="form-inline">
+                <input type="text" id="link-input" placeholder="Ej: twitter.com" class="form-control">
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-plus"></i> Añadir
+                </button>
+            </form>
+            <div id="allowed-links-list" class="tags-list" style="margin-top:12px;">
+                <span class="tag">Cargando...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ajustes de Moderación -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-sliders-h"></i>
+            <h3>Ajustes de Moderación</h3>
+        </div>
+        <div class="card-body">
+            <!-- Modo Lento -->
+            <div class="moderation-setting">
+                <div class="setting-header">
+                    <i class="fas fa-clock"></i>
+                    <span>Modo Lento</span>
+                    <label class="switch">
+                        <input type="checkbox" id="slow-mode-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="setting-controls" id="slow-controls" style="display:none;">
+                    <label>Segundos entre mensajes:</label>
+                    <input type="number" id="slow-seconds" value="10" min="1" max="120" style="width:80px;">
+                    <button onclick="applySlowMode()" class="btn-primary btn-sm">
+                        <i class="fas fa-check"></i> Aplicar
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modo Followers -->
+            <div class="moderation-setting">
+                <div class="setting-header">
+                    <i class="fas fa-users"></i>
+                    <span>Modo Solo Seguidores</span>
+                    <label class="switch">
+                        <input type="checkbox" id="followers-mode-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="setting-controls" id="followers-controls" style="display:none;">
+                    <label>Minutos siguiendo:</label>
+                    <input type="number" id="followers-minutes" value="10" min="1" max="129600" style="width:80px;">
+                    <button onclick="applyFollowersMode()" class="btn-primary btn-sm">
+                        <i class="fas fa-check"></i> Aplicar
+                    </button>
+                </div>
+            </div>
+
+            <!-- Modo Emotes -->
+            <div class="moderation-setting">
+                <div class="setting-header">
+                    <i class="fas fa-smile"></i>
+                    <span>Modo Solo Emotes</span>
+                    <label class="switch">
+                        <input type="checkbox" id="emote-mode-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Modo Suscriptores -->
+            <div class="moderation-setting">
+                <div class="setting-header">
+                    <i class="fas fa-crown"></i>
+                    <span>Modo Solo Suscriptores</span>
+                    <label class="switch">
+                        <input type="checkbox" id="subscriber-mode-toggle">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Máximo de advertencias -->
+            <div class="moderation-setting" style="border-bottom: none; padding-bottom: 0;">
+                <div class="setting-header">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <span>Máximo de advertencias</span>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <input type="number" id="max-warnings" value="3" min="1" max="10" 
+                               style="width:60px; background: var(--bg-input); border: 1px solid var(--border-color); 
+                                      border-radius: 6px; color: var(--text-primary); padding: 4px 8px; font-size: 14px;
+                                      -moz-appearance: textfield; appearance: textfield;">
+                        <button onclick="applyMaxWarnings()" class="btn-primary btn-sm" 
+                                style="display: inline-flex; align-items: center; justify-content: center; 
+                                       padding: 6px 10px; min-width: 32px; background: var(--color-accent); 
+                                       border: none; border-radius: 6px; color: #fff; cursor: pointer; 
+                                       transition: var(--transition);">
+                            <i class="fas fa-check" style="color: #fff; font-size: 14px;"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Gestión de Advertencias (todas) -->
+<div class="card" style="margin-top:20px;">
+    <div class="card-header">
+        <i class="fas fa-exclamation-triangle"></i>
+        <h3>Gestión de Advertencias</h3>
+        <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+            <input type="text" id="warnings-search" placeholder="🔍 Buscar usuario..." class="search-input" style="width:150px;">
+            <span class="badge" id="warnings-count">0</span>
+            <button onclick="refreshWarnings()" class="btn-icon" title="Refrescar advertencias">
+                <i class="fas fa-sync"></i>
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="warnings-list">
+            <div class="text-center" style="color: var(--text-secondary); padding: 20px;">
+                Cargando advertencias...
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Usuarios en Timeout -->
+<div class="card" style="margin-top:20px;">
+    <div class="card-header">
+        <i class="fas fa-clock"></i>
+        <h3>Usuarios en Timeout</h3>
+        <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+            <input type="text" id="timeouts-search" placeholder="🔍 Buscar usuario..." class="search-input" style="width:150px;">
+            <span class="badge" id="timeouts-count">0</span>
+            <button onclick="refreshTimeouts()" class="btn-icon" title="Refrescar timeouts">
+                <i class="fas fa-sync"></i>
+            </button>
+            <button onclick="checkAllUsers()" class="btn-icon" title="Verificar todos en Twitch" style="background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-color);">
+                <i class="fas fa-search"></i>
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="timeouts-list">
+            <div class="text-center" style="color: var(--text-secondary); padding: 20px;">
+                Cargando timeouts...
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Usuarios Baneados -->
+<div class="card" style="margin-top:20px;">
+    <div class="card-header">
+        <i class="fas fa-ban"></i>
+        <h3>Usuarios Baneados</h3>
+        <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+            <input type="text" id="banned-search" placeholder="🔍 Buscar usuario..." class="search-input" style="width:150px;">
+            <span class="badge" id="banned-count">0</span>
+            <button onclick="refreshBanned()" class="btn-icon" title="Refrescar baneados">
+                <i class="fas fa-sync"></i>
+            </button>
+            <button onclick="checkAllUsers()" class="btn-icon" title="Verificar todos en Twitch" style="background: var(--bg-input); color: var(--text-primary); border: 1px solid var(--border-color);">
+                <i class="fas fa-search"></i>
+            </button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div id="banned-list">
+            <div class="text-center" style="color: var(--text-secondary); padding: 20px;">
+                Cargando baneados...
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* ============================================
+   ESTILOS (se mantienen igual)
+   ============================================ */
+.moderation-setting {
+    border-bottom: 1px solid var(--border-color);
+    padding: 12px 0;
+}
+.moderation-setting:last-child {
+    border-bottom: none;
+}
+.setting-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.setting-header i {
+    color: var(--color-accent);
+    width: 20px;
+    text-align: center;
+}
+.setting-header span {
+    flex: 1;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+.setting-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+    padding-left: 32px;
+}
+.setting-controls label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0;
+}
+.setting-controls input[type="number"] {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    padding: 4px 8px;
+    font-size: 14px;
+}
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+}
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--bg-hover);
+    transition: .3s;
+    border-radius: 24px;
+}
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--text-muted);
+    transition: .3s;
+    border-radius: 50%;
+}
+.switch input:checked + .slider {
+    background-color: var(--color-accent);
+}
+.switch input:checked + .slider:before {
+    transform: translateX(20px);
+    background-color: white;
+}
+.warning-item, .timeout-item, .banned-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.warning-item:hover, .timeout-item:hover, .banned-item:hover {
+    background: var(--bg-secondary);
+}
+.warning-item:last-child, .timeout-item:last-child, .banned-item:last-child {
+    border-bottom: none;
+}
+.warning-item > div:first-child, .timeout-item > div:first-child, .banned-item > div:first-child {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+.warning-item > div:first-child strong, .timeout-item > div:first-child strong, .banned-item > div:first-child strong {
+    color: var(--text-primary);
+}
+.warning-item > div:last-child, .timeout-item > div:last-child, .banned-item > div:last-child {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.link-info {
+    background: var(--bg-input);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.link-info p {
+    margin: 0;
+}
+.link-info small {
+    display: block;
+    margin-top: 4px;
+    color: var(--text-muted);
+}
+.btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 10px;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.btn-icon:hover {
+    background: var(--bg-hover);
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+.search-input {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    padding: 6px 12px;
+    font-size: 13px;
+    transition: var(--transition);
+}
+.search-input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+}
+.search-input::placeholder {
+    color: var(--text-muted);
+}
+.hidden-item {
+    display: none !important;
+}
+@media (max-width: 768px) {
+    .warning-item, .timeout-item, .banned-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    .warning-item > div:last-child, .timeout-item > div:last-child, .banned-item > div:last-child {
+        width: 100%;
+        justify-content: flex-start;
+    }
+    .warning-item > div:last-child button, .timeout-item > div:last-child button, .banned-item > div:last-child button {
+        flex: 1;
+        justify-content: center;
+    }
+    .search-input {
+        width: 100px !important;
+    }
+}
+@media (max-width: 480px) {
+    .warning-item > div:last-child {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+    }
+    .warning-item > div:last-child button {
+        width: 100%;
+        justify-content: center;
+        font-size: 11px;
+        padding: 4px 8px;
+    }
+    .search-input {
+        width: 80px !important;
+        font-size: 11px;
+    }
+}
+</style>
+
+<script>
+// ============================================
+// ESPERAR A QUE DASHBOARDAPI ESTÉ DISPONIBLE
+// ============================================
+
+function waitForDashboardAPI(retries = 30) {
+    return new Promise((resolve, reject) => {
+        if (typeof window.dashboardAPI !== 'undefined' && window.dashboardAPI) {
+            resolve(window.dashboardAPI);
+            return;
+        }
+        if (retries <= 0) {
+            reject(new Error('dashboardAPI no disponible después de varios intentos'));
+            return;
+        }
+        setTimeout(() => {
+            waitForDashboardAPI(retries - 1).then(resolve).catch(reject);
+        }, 200);
+    });
+}
+
+// ============================================
+// FUNCIONES COMUNES
+// ============================================
+
+function reloadBannedWordsInBot() {
+    fetch('/api/moderation/banned_words/reload', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('✅ Palabras prohibidas recargadas en el bot', 'success');
+            }
+        })
+        .catch(err => console.error('Error recargando palabras:', err));
+}
+
+// ============================================
+// ACTUALIZAR TEXTO DEL SISTEMA DE ADVERTENCIAS
+// ============================================
+
+function updateWarningText(maxWarnings) {
+    const warning1 = maxWarnings - 1;
+    const timeout = maxWarnings;
+    const ban = maxWarnings + 1;
+    const description = `Advertencias: 1-${warning1} = aviso, ${timeout} = timeout (10 min), ${ban}+ = ban (14 días)`;
+    
+    const linkText = document.getElementById('warning-system-description');
+    if (linkText) linkText.textContent = description;
+    
+    const bannedText = document.getElementById('banned-words-warning-text');
+    if (bannedText) bannedText.textContent = description;
+}
+
+// ============================================
+// CONFIGURACIÓN DE MODERACIÓN
+// ============================================
+
+let currentSettings = {};
+
+function loadModerationSettings() {
+    fetch('/api/moderation/settings')
+        .then(res => res.json())
+        .then(data => {
+            currentSettings = data;
+            
+            document.getElementById('slow-mode-toggle').checked = data.slow_mode?.enabled || false;
+            document.getElementById('slow-seconds').value = data.slow_mode?.seconds || 10;
+            document.getElementById('slow-controls').style.display = data.slow_mode?.enabled ? 'flex' : 'none';
+            
+            document.getElementById('followers-mode-toggle').checked = data.follower_mode?.enabled || false;
+            document.getElementById('followers-minutes').value = data.follower_mode?.minutes || 10;
+            document.getElementById('followers-controls').style.display = data.follower_mode?.enabled ? 'flex' : 'none';
+            
+            document.getElementById('emote-mode-toggle').checked = data.emote_mode || false;
+            document.getElementById('subscriber-mode-toggle').checked = data.subscriber_mode || false;
+            
+            const maxWarnings = data.max_warnings || 3;
+            document.getElementById('max-warnings').value = maxWarnings;
+            updateWarningText(maxWarnings);
+        })
+        .catch(err => console.error('Error cargando configuración:', err));
+}
+
+// Modo Lento
+document.getElementById('slow-mode-toggle').addEventListener('change', function() {
+    document.getElementById('slow-controls').style.display = this.checked ? 'flex' : 'none';
+    applySlowMode();
+});
+
+function applySlowMode() {
+    const enabled = document.getElementById('slow-mode-toggle').checked;
+    const seconds = parseInt(document.getElementById('slow-seconds').value) || 10;
+    
+    fetch('/api/moderation/slow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, seconds })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            showToast(`✅ Modo lento ${enabled ? 'activado' : 'desactivado'}${enabled ? ` (${seconds}s)` : ''}`, 'success');
+        } else {
+            showToast('❌ Error: ' + data.error, 'error');
+        }
+    })
+    .catch(() => showToast('❌ Error al aplicar modo lento', 'error'));
+}
+
+// Modo Followers
+document.getElementById('followers-mode-toggle').addEventListener('change', function() {
+    document.getElementById('followers-controls').style.display = this.checked ? 'flex' : 'none';
+    applyFollowersMode();
+});
+
+function applyFollowersMode() {
+    const enabled = document.getElementById('followers-mode-toggle').checked;
+    const minutes = parseInt(document.getElementById('followers-minutes').value) || 10;
+    
+    fetch('/api/moderation/followers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, minutes })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            showToast(`✅ Modo seguidores ${enabled ? 'activado' : 'desactivado'}${enabled ? ` (${minutes}m)` : ''}`, 'success');
+        } else {
+            showToast('❌ Error: ' + data.error, 'error');
+        }
+    })
+    .catch(() => showToast('❌ Error al aplicar modo seguidores', 'error'));
+}
+
+// Modo Emotes
+document.getElementById('emote-mode-toggle').addEventListener('change', function() {
+    const enabled = this.checked;
+    
+    fetch('/api/moderation/emote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            showToast(`✅ Modo emotes ${enabled ? 'activado' : 'desactivado'}`, 'success');
+        } else {
+            showToast('❌ Error: ' + data.error, 'error');
+            this.checked = !enabled;
+        }
+    })
+    .catch(() => showToast('❌ Error al aplicar modo emotes', 'error'));
+});
+
+// Modo Suscriptores
+document.getElementById('subscriber-mode-toggle').addEventListener('change', function() {
+    const enabled = this.checked;
+    
+    fetch('/api/moderation/subscriber', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            showToast(`✅ Modo suscriptores ${enabled ? 'activado' : 'desactivado'}`, 'success');
+        } else {
+            showToast('❌ Error: ' + data.error, 'error');
+            this.checked = !enabled;
+        }
+    })
+    .catch(() => showToast('❌ Error al aplicar modo suscriptores', 'error'));
+});
+
+// Máximo advertencias
+function applyMaxWarnings() {
+    const value = parseInt(document.getElementById('max-warnings').value) || 3;
+    
+    if (value < 1 || value > 10) {
+        showToast('❌ El valor debe estar entre 1 y 10', 'error');
+        return;
+    }
+    
+    fetch('/api/moderation/max_warnings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            showToast(`✅ Máximo de advertencias actualizado a ${value}`, 'success');
+            updateWarningText(value);
+        } else {
+            showToast('❌ Error: ' + data.error, 'error');
+        }
+    })
+    .catch(() => showToast('❌ Error al actualizar máximo de advertencias', 'error'));
+}
+
+// ============================================
+// PALABRAS PROHIBIDAS
+// ============================================
+
+function loadBannedWords() {
+    fetch('/api/moderation/banned_words')
+        .then(res => res.json())
+        .then(words => {
+            const list = document.getElementById('banned-words-list');
+            if (words.length === 0) {
+                list.innerHTML = '<span class="tag">No hay palabras prohibidas</span>';
+                return;
+            }
+            list.innerHTML = words.map(word => `
+                <span class="tag">
+                    ${word}
+                    <button class="tag-remove" onclick="removeWord('${word}')">×</button>
+                </span>
+            `).join('');
+        })
+        .catch(() => {});
+}
+
+async function removeWord(word) {
+    const confirmed = await showModal(
+        '⚠️ Confirmar eliminación',
+        `¿Estás seguro de eliminar "${word}" de las palabras prohibidas?`,
+        'Eliminar',
+        'Cancelar',
+        'danger'
+    );
+    
+    if (!confirmed) return;
+    
+    fetch(`/api/moderation/banned_words/${encodeURIComponent(word)}`, { method: 'DELETE' })
+        .then(res => res.json())
+        .then(data => {
+            if (!data.error) {
+                loadBannedWords();
+                reloadBannedWordsInBot();
+                showToast(`✅ Palabra "${word}" eliminada`, 'success');
+            }
+        })
+        .catch(() => showToast('❌ Error al eliminar palabra', 'error'));
+}
+
+document.getElementById('add-word-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const word = document.getElementById('word-input').value.trim();
+    if (!word) return;
+    
+    fetch('/api/moderation/banned_words', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ word })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (!data.error) {
+            document.getElementById('word-input').value = '';
+            loadBannedWords();
+            reloadBannedWordsInBot();
+            showToast(`✅ Palabra "${word}" añadida`, 'success');
+        } else {
+            showToast('❌ ' + data.error, 'error');
+        }
+    })
+    .catch(() => showToast('❌ Error al añadir palabra', 'error'));
+});
+
+// ============================================
+// ENLACES PERMITIDOS
+// ============================================
+
+function loadAllowedLinks() {
+    fetch('/api/links/allowed')
+        .then(res => res.json())
+        .then(links => {
+            const list = document.getElementById('allowed-links-list');
+            if (!links || links.length === 0) {
+                list.innerHTML = '<span class="tag">No hay enlaces permitidos configurados</span>';
+                return;
+            }
+            list.innerHTML = links.map(domain => `
+                <span class="tag">
+                    ${domain}
+                    <button class="tag-remove" onclick="removeLink('${domain}')">×</button>
+                </span>
+            `).join('');
+        })
+        .catch(() => {});
+}
+
+async function removeLink(domain) {
+    const confirmed = await showModal(
+        '⚠️ Confirmar eliminación',
+        `¿Estás seguro de eliminar "${domain}" de los enlaces permitidos?`,
+        'Eliminar',
+        'Cancelar',
+        'danger'
+    );
+    
+    if (!confirmed) return;
+    
+    fetch(`/api/links/allowed/${encodeURIComponent(domain)}`, { method: 'DELETE' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                loadAllowedLinks();
+                showToast(`✅ Dominio "${domain}" eliminado`, 'success');
+            } else {
+                showToast('❌ Error: ' + data.error, 'error');
+            }
+        })
+        .catch(() => showToast('❌ Error al eliminar dominio', 'error'));
+}
+
+document.getElementById('add-link-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const domain = document.getElementById('link-input').value.trim();
+    if (!domain) return;
+    
+    const cleanDomain = domain.replace('https://', '').replace('http://', '').replace('www.', '');
+    
+    fetch('/api/links/allowed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: cleanDomain })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('link-input').value = '';
+            loadAllowedLinks();
+            showToast(`✅ Dominio "${cleanDomain}" añadido`, 'success');
+        } else {
+            showToast('❌ Error: ' + data.error, 'error');
+        }
+    })
+    .catch(() => showToast('❌ Error al añadir dominio', 'error'));
+});
+
+// ============================================
+// GESTIÓN DE ADVERTENCIAS - CON SELECCIÓN POR TIPO Y CANTIDAD
+// ============================================
+
+let dashboardAPIAvailable = false;
+
+function loadWarningsFromData(data) {
+    const container = document.getElementById('warnings-list');
+    const count = document.getElementById('warnings-count');
+    const warnings = data?.moderation?.all_warnings || [];
+    
+    if (warnings.length === 0) {
+        container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">No hay advertencias activas</div>';
+        count.textContent = '0';
+        return;
+    }
+    
+    count.textContent = warnings.length;
+    container.innerHTML = warnings.map(item => {
+        const detail = item.detail || {};
+        const typeNames = {
+            'link': 'Enlaces',
+            'word': 'Palabras prohibidas',
+            'caps': 'Mayúsculas excesivas',
+            'rate': 'Spam (velocidad)',
+            'repeat': 'Mensajes repetidos'
+        };
+        
+        // Generar controles por tipo
+        let typeControls = '';
+        for (const [type, typeCount] of Object.entries(detail)) {
+            if (typeCount <= 0) continue;
+            const displayName = typeNames[type] || type;
+            typeControls += `
+                <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                    <span style="font-size: 13px; color: var(--text-secondary);">${displayName}: ${typeCount}</span>
+                    <input type="number" id="warn-reduce-${item.user_id}-${type}" 
+                           min="1" max="${typeCount}" value="${Math.min(1, typeCount)}" 
+                           style="width: 50px; background: var(--bg-input); border: 1px solid var(--border-color); 
+                                  border-radius: 4px; color: var(--text-primary); padding: 2px 4px; font-size: 13px;
+                                  -moz-appearance: textfield; appearance: textfield;">
+                    <button onclick="clearWarnings('${item.user_id}', '${type}', parseInt(document.getElementById('warn-reduce-${item.user_id}-${type}').value))" 
+                            class="btn-danger btn-sm" style="padding: 2px 8px; font-size: 11px;">
+                        <i class="fas fa-minus"></i> Eliminar
+                    </button>
+                </div>
+            `;
+        }
+        
+        return `
+            <div class="warning-item" data-user="${item.user_name.toLowerCase()}">
+                <div>
+                    <strong>${item.user_name}</strong>
+                    <span style="color: var(--text-secondary); font-size: 13px;">
+                        ${item.types ? item.types.join('; ') : ''}
+                    </span>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+                    ${typeControls}
+                    <!-- Botón "Todas" con texto blanco visible siempre -->
+                    <button onclick="clearWarnings('${item.user_id}', null, 0)" 
+                            class="btn-danger btn-sm" 
+                            style="background: var(--color-danger); border-color: var(--color-danger); color: #fff !important;">
+                        <i class="fas fa-trash"></i> Todas
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    filterWarnings();
+}
+
+function loadWarnings() {
+    if (dashboardAPIAvailable && window.dashboardAPI) {
+        window.dashboardAPI.getData().then(data => {
+            loadWarningsFromData(data);
+        }).catch(() => {
+            loadWarningsFallback();
+        });
+    } else {
+        loadWarningsFallback();
+    }
+}
+
+function loadWarningsFallback() {
+    fetch('/api/dashboard-data')
+        .then(res => res.json())
+        .then(data => {
+            loadWarningsFromData(data);
+        })
+        .catch(() => {
+            const container = document.getElementById('warnings-list');
+            container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">❌ Error al cargar advertencias</div>';
+        });
+}
+
+function refreshWarnings() {
+    if (window.dashboardAPI && dashboardAPIAvailable) {
+        window.dashboardAPI.refresh().then(() => {
+            showToast('🔄 Advertencias actualizadas', 'info');
+        }).catch(() => {
+            loadWarningsFallback();
+            showToast('🔄 Advertencias actualizadas (fallback)', 'info');
+        });
+    } else {
+        loadWarningsFallback();
+        showToast('🔄 Advertencias actualizadas', 'info');
+    }
+}
+
+async function clearWarnings(userId, type, count) {
+    let message = '';
+    let confirmText = '';
+    let payload = {};
+    
+    if (type === null) {
+        // Eliminar todas las advertencias del usuario
+        message = '¿Eliminar TODAS las advertencias de este usuario?';
+        confirmText = 'Eliminar todas';
+        // No enviamos type para que borre todas
+    } else {
+        // Eliminar una cantidad específica de un tipo
+        const typeNames = {
+            'link': 'enlaces',
+            'word': 'palabras prohibidas',
+            'caps': 'mayúsculas excesivas',
+            'rate': 'spam por velocidad',
+            'repeat': 'mensajes repetidos'
+        };
+        const displayType = typeNames[type] || type;
+        message = `¿Eliminar ${count} advertencia(s) por ${displayType}?`;
+        confirmText = `Eliminar ${count}`;
+        payload.type = type;
+        payload.count = count;
+    }
+    
+    const confirmed = await showModal(
+        '⚠️ Confirmar acción',
+        message,
+        confirmText,
+        'Cancelar',
+        'danger'
+    );
+    
+    if (!confirmed) return;
+    
+    fetch(`/api/warnings/${userId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            if (window.dashboardAPI && dashboardAPIAvailable) {
+                window.dashboardAPI.refresh();
+            }
+            loadWarnings();
+            showToast(`✅ ${data.message}`, 'success');
+        } else {
+            showToast('❌ Error: ' + data.error, 'error');
+        }
+    })
+    .catch(() => showToast('❌ Error al eliminar advertencias', 'error'));
+}
+
+// ============================================
+// USUARIOS EN TIMEOUT (sin cambios)
+// ============================================
+
+function loadTimeoutsFromData(data) {
+    const container = document.getElementById('timeouts-list');
+    const count = document.getElementById('timeouts-count');
+    
+    const twitchTimeouts = data?.moderation?.timeouts || [];
+    const botTimeouts = data?.moderation?.bot_timeouts || [];
+    const allTimeouts = [...twitchTimeouts, ...botTimeouts];
+    
+    if (allTimeouts.length === 0) {
+        container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">No hay usuarios en timeout</div>';
+        count.textContent = '0';
+        return;
+    }
+    
+    count.textContent = allTimeouts.length;
+    container.innerHTML = allTimeouts.map(item => {
+        const isTwitch = data?.moderation?.timeouts?.some(t => t.user_id === item.user_id);
+        return `
+            <div class="timeout-item" data-user="${item.user_name.toLowerCase()}">
+                <div>
+                    <strong>${item.user_name}</strong>
+                    <span style="color: var(--text-secondary); font-size: 13px;">
+                        Restante: ${item.remaining_formatted || '0s'}
+                        ${isTwitch ? ' <span style="color: var(--color-info); font-size: 11px;">(Twitch)</span>' : ''}
+                    </span>
+                </div>
+                <div>
+                    <button onclick="checkUserStatus('${item.user_id}', '${item.user_name}')" class="btn-icon" title="Verificar estado en Twitch">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <button onclick="removeTimeout('${item.user_id}')" class="btn-success btn-sm">
+                        <i class="fas fa-check"></i> Quitar Timeout
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    filterTimeouts();
+}
+
+function loadTimeouts() {
+    if (dashboardAPIAvailable && window.dashboardAPI) {
+        window.dashboardAPI.getData().then(data => {
+            loadTimeoutsFromData(data);
+        }).catch(() => {
+            loadTimeoutsFallback();
+        });
+    } else {
+        loadTimeoutsFallback();
+    }
+}
+
+function loadTimeoutsFallback() {
+    fetch('/api/twitch/timeouts')
+        .then(res => res.json())
+        .then(twitchTimeouts => {
+            fetch('/api/link/timeouts')
+                .then(res => res.json())
+                .then(botTimeouts => {
+                    const container = document.getElementById('timeouts-list');
+                    const count = document.getElementById('timeouts-count');
+                    
+                    const allTimeouts = [...twitchTimeouts, ...botTimeouts];
+                    
+                    if (allTimeouts.length === 0) {
+                        container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">No hay usuarios en timeout</div>';
+                        count.textContent = '0';
+                        return;
+                    }
+                    
+                    count.textContent = allTimeouts.length;
+                    container.innerHTML = allTimeouts.map(item => {
+                        const isTwitch = twitchTimeouts.some(t => t.user_id === item.user_id);
+                        return `
+                            <div class="timeout-item" data-user="${item.user_name.toLowerCase()}">
+                                <div>
+                                    <strong>${item.user_name}</strong>
+                                    <span style="color: var(--text-secondary); font-size: 13px;">
+                                        Restante: ${item.remaining_formatted || '0s'}
+                                        ${isTwitch ? ' <span style="color: var(--color-info); font-size: 11px;">(Twitch)</span>' : ''}
+                                    </span>
+                                </div>
+                                <div>
+                                    <button onclick="checkUserStatus('${item.user_id}', '${item.user_name}')" class="btn-icon" title="Verificar estado en Twitch">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                    <button onclick="removeTimeout('${item.user_id}')" class="btn-success btn-sm">
+                                        <i class="fas fa-check"></i> Quitar Timeout
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    filterTimeouts();
+                })
+                .catch(() => {
+                    const container = document.getElementById('timeouts-list');
+                    container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">❌ Error al cargar timeouts</div>';
+                });
+        })
+        .catch(() => {
+            const container = document.getElementById('timeouts-list');
+            container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">❌ Error al cargar timeouts</div>';
+        });
+}
+
+function refreshTimeouts() {
+    if (window.dashboardAPI && dashboardAPIAvailable) {
+        window.dashboardAPI.refresh().then(() => {
+            showToast('🔄 Timeouts actualizados', 'info');
+        }).catch(() => {
+            loadTimeoutsFallback();
+            showToast('🔄 Timeouts actualizados (fallback)', 'info');
+        });
+    } else {
+        loadTimeoutsFallback();
+        showToast('🔄 Timeouts actualizados', 'info');
+    }
+}
+
+async function removeTimeout(userId) {
+    const confirmed = await showModal(
+        '⚠️ Confirmar acción',
+        `¿Quitar timeout al usuario ${userId}?`,
+        'Quitar Timeout',
+        'Cancelar',
+        'danger'
+    );
+    
+    if (!confirmed) return;
+    
+    fetch(`/api/twitch/timeout/${userId}`, { method: 'DELETE' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast(`✅ ${data.message}`, 'success');
+                if (window.dashboardAPI && dashboardAPIAvailable) {
+                    window.dashboardAPI.refresh();
+                }
+                loadTimeouts();
+                loadBanned();
+            } else {
+                showToast('❌ Error: ' + data.error, 'error');
+            }
+        })
+        .catch(() => showToast('❌ Error al quitar timeout', 'error'));
+}
+
+// ============================================
+// USUARIOS BANEADOS (sin cambios)
+// ============================================
+
+function loadBannedFromData(data) {
+    const container = document.getElementById('banned-list');
+    const count = document.getElementById('banned-count');
+    
+    const twitchBanned = data?.moderation?.banned || [];
+    const botBanned = data?.moderation?.bot_banned || [];
+    const allBanned = [...twitchBanned, ...botBanned];
+    
+    if (allBanned.length === 0) {
+        container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">No hay usuarios baneados</div>';
+        count.textContent = '0';
+        return;
+    }
+    
+    count.textContent = allBanned.length;
+    container.innerHTML = allBanned.map(item => {
+        const isTwitch = data?.moderation?.banned?.some(t => t.user_id === item.user_id);
+        return `
+            <div class="banned-item" data-user="${item.user_name.toLowerCase()}">
+                <div>
+                    <strong>${item.user_name}</strong>
+                    <span style="color: var(--text-secondary); font-size: 13px;">
+                        Razón: ${item.reason || 'No especificada'}
+                        ${isTwitch ? ' <span style="color: var(--color-info); font-size: 11px;">(Twitch)</span>' : ''}
+                    </span>
+                    ${item.banned_at ? `<span style="color: var(--text-muted); font-size: 12px; display: block; margin-top: 2px;">Baneado: ${new Date(item.banned_at).toLocaleString()}</span>` : ''}
+                </div>
+                <div>
+                    <button onclick="checkUserStatus('${item.user_id}', '${item.user_name}')" class="btn-icon" title="Verificar estado en Twitch">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <button onclick="removeBan('${item.user_id}')" class="btn-success btn-sm">
+                        <i class="fas fa-check"></i> Desbanear
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    filterBanned();
+}
+
+function loadBanned() {
+    if (dashboardAPIAvailable && window.dashboardAPI) {
+        window.dashboardAPI.getData().then(data => {
+            loadBannedFromData(data);
+        }).catch(() => {
+            loadBannedFallback();
+        });
+    } else {
+        loadBannedFallback();
+    }
+}
+
+function loadBannedFallback() {
+    fetch('/api/twitch/banned')
+        .then(res => res.json())
+        .then(twitchBanned => {
+            fetch('/api/link/banned')
+                .then(res => res.json())
+                .then(botBanned => {
+                    const container = document.getElementById('banned-list');
+                    const count = document.getElementById('banned-count');
+                    
+                    const allBanned = [...twitchBanned, ...botBanned];
+                    
+                    if (allBanned.length === 0) {
+                        container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">No hay usuarios baneados</div>';
+                        count.textContent = '0';
+                        return;
+                    }
+                    
+                    count.textContent = allBanned.length;
+                    container.innerHTML = allBanned.map(item => {
+                        const isTwitch = twitchBanned.some(t => t.user_id === item.user_id);
+                        return `
+                            <div class="banned-item" data-user="${item.user_name.toLowerCase()}">
+                                <div>
+                                    <strong>${item.user_name}</strong>
+                                    <span style="color: var(--text-secondary); font-size: 13px;">
+                                        Razón: ${item.reason || 'No especificada'}
+                                        ${isTwitch ? ' <span style="color: var(--color-info); font-size: 11px;">(Twitch)</span>' : ''}
+                                    </span>
+                                    ${item.banned_at ? `<span style="color: var(--text-muted); font-size: 12px; display: block; margin-top: 2px;">Baneado: ${new Date(item.banned_at).toLocaleString()}</span>` : ''}
+                                </div>
+                                <div>
+                                    <button onclick="checkUserStatus('${item.user_id}', '${item.user_name}')" class="btn-icon" title="Verificar estado en Twitch">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                    <button onclick="removeBan('${item.user_id}')" class="btn-success btn-sm">
+                                        <i class="fas fa-check"></i> Desbanear
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    
+                    filterBanned();
+                })
+                .catch(() => {
+                    const container = document.getElementById('banned-list');
+                    container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">❌ Error al cargar baneados</div>';
+                });
+        })
+        .catch(() => {
+            const container = document.getElementById('banned-list');
+            container.innerHTML = '<div class="text-center" style="color: var(--text-secondary); padding: 20px;">❌ Error al cargar baneados</div>';
+        });
+}
+
+function refreshBanned() {
+    if (window.dashboardAPI && dashboardAPIAvailable) {
+        window.dashboardAPI.refresh().then(() => {
+            showToast('🔄 Baneados actualizados', 'info');
+        }).catch(() => {
+            loadBannedFallback();
+            showToast('🔄 Baneados actualizados (fallback)', 'info');
+        });
+    } else {
+        loadBannedFallback();
+        showToast('🔄 Baneados actualizados', 'info');
+    }
+}
+
+async function removeBan(userId) {
+    const confirmed = await showModal(
+        '⚠️ Confirmar acción',
+        `¿Desbanear al usuario ${userId}?`,
+        'Desbanear',
+        'Cancelar',
+        'danger'
+    );
+    
+    if (!confirmed) return;
+    
+    fetch(`/api/twitch/ban/${userId}`, { method: 'DELETE' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast(`✅ ${data.message}`, 'success');
+                if (window.dashboardAPI && dashboardAPIAvailable) {
+                    window.dashboardAPI.refresh();
+                }
+                loadBanned();
+                loadTimeouts();
+            } else {
+                showToast('❌ Error: ' + data.error, 'error');
+            }
+        })
+        .catch(() => showToast('❌ Error al desbanear', 'error'));
+}
+
+// ============================================
+// BÚSQUEDA Y FILTRADO (sin cambios)
+// ============================================
+
+function filterWarnings() {
+    const search = document.getElementById('warnings-search').value.toLowerCase().trim();
+    const items = document.querySelectorAll('#warnings-list .warning-item');
+    let visible = 0;
+    
+    if (search === '') {
+        items.forEach(item => {
+            item.style.display = 'flex';
+            visible++;
+        });
+        const container = document.getElementById('warnings-list');
+        const existingMessage = container.querySelector('.no-results-message');
+        if (existingMessage) existingMessage.remove();
+        return;
+    }
+    
+    items.forEach(item => {
+        const user = (item.getAttribute('data-user') || '').toLowerCase();
+        if (user.includes(search)) {
+            item.style.display = 'flex';
+            visible++;
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    const container = document.getElementById('warnings-list');
+    const existingMessage = container.querySelector('.no-results-message');
+    
+    if (visible === 0) {
+        if (!existingMessage) {
+            const msg = document.createElement('div');
+            msg.className = 'text-center no-results-message';
+            msg.style.color = 'var(--text-secondary)';
+            msg.style.padding = '20px';
+            msg.textContent = `🔍 No se encontraron resultados para "${search}"`;
+            container.appendChild(msg);
+        } else {
+            existingMessage.textContent = `🔍 No se encontraron resultados para "${search}"`;
+        }
+    } else if (existingMessage) {
+        existingMessage.remove();
+    }
+}
+
+function filterTimeouts() {
+    const search = document.getElementById('timeouts-search').value.toLowerCase().trim();
+    const items = document.querySelectorAll('#timeouts-list .timeout-item');
+    let visible = 0;
+    
+    if (search === '') {
+        items.forEach(item => {
+            item.style.display = 'flex';
+            visible++;
+        });
+        const container = document.getElementById('timeouts-list');
+        const existingMessage = container.querySelector('.no-results-message');
+        if (existingMessage) existingMessage.remove();
+        return;
+    }
+    
+    items.forEach(item => {
+        const user = (item.getAttribute('data-user') || '').toLowerCase();
+        if (user.includes(search)) {
+            item.style.display = 'flex';
+            visible++;
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    const container = document.getElementById('timeouts-list');
+    const existingMessage = container.querySelector('.no-results-message');
+    
+    if (visible === 0) {
+        if (!existingMessage) {
+            const msg = document.createElement('div');
+            msg.className = 'text-center no-results-message';
+            msg.style.color = 'var(--text-secondary)';
+            msg.style.padding = '20px';
+            msg.textContent = `🔍 No se encontraron resultados para "${search}"`;
+            container.appendChild(msg);
+        } else {
+            existingMessage.textContent = `🔍 No se encontraron resultados para "${search}"`;
+        }
+    } else if (existingMessage) {
+        existingMessage.remove();
+    }
+}
+
+function filterBanned() {
+    const search = document.getElementById('banned-search').value.toLowerCase().trim();
+    const items = document.querySelectorAll('#banned-list .banned-item');
+    let visible = 0;
+    
+    if (search === '') {
+        items.forEach(item => {
+            item.style.display = 'flex';
+            visible++;
+        });
+        const container = document.getElementById('banned-list');
+        const existingMessage = container.querySelector('.no-results-message');
+        if (existingMessage) existingMessage.remove();
+        return;
+    }
+    
+    items.forEach(item => {
+        const user = (item.getAttribute('data-user') || '').toLowerCase();
+        if (user.includes(search)) {
+            item.style.display = 'flex';
+            visible++;
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    const container = document.getElementById('banned-list');
+    const existingMessage = container.querySelector('.no-results-message');
+    
+    if (visible === 0) {
+        if (!existingMessage) {
+            const msg = document.createElement('div');
+            msg.className = 'text-center no-results-message';
+            msg.style.color = 'var(--text-secondary)';
+            msg.style.padding = '20px';
+            msg.textContent = `🔍 No se encontraron resultados para "${search}"`;
+            container.appendChild(msg);
+        } else {
+            existingMessage.textContent = `🔍 No se encontraron resultados para "${search}"`;
+        }
+    } else if (existingMessage) {
+        existingMessage.remove();
+    }
+}
+
+// Event listeners para búsqueda
+document.getElementById('warnings-search').addEventListener('input', filterWarnings);
+document.getElementById('timeouts-search').addEventListener('input', filterTimeouts);
+document.getElementById('banned-search').addEventListener('input', filterBanned);
+
+// ============================================
+// VERIFICACIÓN DE ESTADO DE USUARIOS
+// ============================================
+
+async function checkUserStatus(userId, userName) {
+    try {
+        const response = await fetch(`/api/twitch/check/${userId}`);
+        const status = await response.json();
+        
+        if (status.error) {
+            showToast(`❌ Error verificando ${userName}: ${status.error}`, 'error');
+            return null;
+        }
+        
+        if (status.banned) {
+            const type = status.is_timeout ? 'timeout' : 'ban';
+            const remaining = status.remaining || 'Permanente';
+            const reason = status.reason || 'No especificada';
+            showToast(`🔍 ${userName} está en ${type}. Restante: ${remaining} - Razón: ${reason}`, 'warning');
+        } else {
+            showToast(`✅ ${userName} no está baneado ni en timeout. ${status.message || ''}`, 'success');
+        }
+        
+        if (window.dashboardAPI && dashboardAPIAvailable) {
+            window.dashboardAPI.refresh();
+        }
+        loadTimeouts();
+        loadBanned();
+        
+        return status;
+    } catch (error) {
+        showToast(`❌ Error verificando ${userName}: ${error.message}`, 'error');
+        return null;
+    }
+}
+
+async function checkAllUsers() {
+    try {
+        let timeouts = [];
+        let banned = [];
+        
+        if (window.dashboardAPI && dashboardAPIAvailable) {
+            try {
+                const data = await window.dashboardAPI.getData();
+                timeouts = data?.moderation?.timeouts || [];
+                banned = data?.moderation?.banned || [];
+            } catch {
+                timeouts = await fetch('/api/twitch/timeouts').then(r => r.json());
+                banned = await fetch('/api/twitch/banned').then(r => r.json());
+            }
+        } else {
+            timeouts = await fetch('/api/twitch/timeouts').then(r => r.json());
+            banned = await fetch('/api/twitch/banned').then(r => r.json());
+        }
+        
+        if (timeouts.length === 0 && banned.length === 0) {
+            showToast('ℹ️ No hay usuarios para verificar', 'info');
+            return;
+        }
+        
+        showToast('🔄 Verificando estado de usuarios en Twitch...', 'info');
+        
+        let totalChecked = 0;
+        let foundChanges = 0;
+        
+        for (const user of timeouts) {
+            try {
+                const response = await fetch(`/api/twitch/check/${user.user_id}`);
+                const status = await response.json();
+                totalChecked++;
+                if (!status.banned) {
+                    foundChanges++;
+                }
+            } catch (e) {
+                console.error(`Error verificando ${user.user_id}:`, e);
+            }
+        }
+        
+        for (const user of banned) {
+            try {
+                const response = await fetch(`/api/twitch/check/${user.user_id}`);
+                const status = await response.json();
+                totalChecked++;
+                if (!status.banned) {
+                    foundChanges++;
+                }
+            } catch (e) {
+                console.error(`Error verificando ${user.user_id}:`, e);
+            }
+        }
+        
+        if (window.dashboardAPI && dashboardAPIAvailable) {
+            window.dashboardAPI.refresh();
+        }
+        loadTimeouts();
+        loadBanned();
+        
+        if (foundChanges > 0) {
+            showToast(`✅ Se encontraron ${foundChanges} cambios. Listas actualizadas.`, 'success');
+        } else {
+            showToast(`✅ Verificados ${totalChecked} usuarios. Todo está sincronizado.`, 'success');
+        }
+    } catch (error) {
+        showToast(`❌ Error verificando usuarios: ${error.message}`, 'error');
+    }
+}
+
+// ============================================
+// INICIALIZACIÓN
+// ============================================
+
+function initializeModeration() {
+    waitForDashboardAPI(20)
+        .then((api) => {
+            console.log('✅ dashboardAPI disponible para moderación');
+            dashboardAPIAvailable = true;
+            window.dashboardAPI = api;
+            
+            api.getData().then(data => {
+                loadWarningsFromData(data);
+                loadTimeoutsFromData(data);
+                loadBannedFromData(data);
+            }).catch(() => {
+                console.warn('⚠️ API unificada falló, usando fallback');
+                loadWarningsFallback();
+                loadTimeoutsFallback();
+                loadBannedFallback();
+            });
+            
+            api.subscribe((data) => {
+                loadWarningsFromData(data);
+                loadTimeoutsFromData(data);
+                loadBannedFromData(data);
+            });
+        })
+        .catch(() => {
+            console.warn('⚠️ dashboardAPI no disponible, usando fetch directo');
+            dashboardAPIAvailable = false;
+            loadWarningsFallback();
+            loadTimeoutsFallback();
+            loadBannedFallback();
+            
+            setInterval(() => {
+                loadWarningsFallback();
+                loadTimeoutsFallback();
+                loadBannedFallback();
+            }, 30000);
+        });
+    
+    loadModerationSettings();
+    loadBannedWords();
+    loadAllowedLinks();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeModeration);
+} else {
+    initializeModeration();
+}
+
+console.log('🛡️ Módulo de moderación cargado correctamente');
+</script>
+{% endblock %}

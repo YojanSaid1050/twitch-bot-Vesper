@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+
+{% block title %}VesperBot - Configuración{% endblock %}
+{% block header %}Configuración General{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-palette"></i>
+            <h3>Personalización del Bot</h3>
+        </div>
+        <div class="card-body">
+            <div class="form-group">
+                <label><i class="fas fa-crown"></i> Icono del Bot</label>
+                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+                    <div id="icon-preview" style="font-size: 48px; padding: 12px; background: var(--bg-input); border-radius: 12px; border: 1px solid var(--border-color); min-width: 80px; text-align: center;">
+                        🕯️
+                    </div>
+                    <div style="flex: 1; min-width: 200px;">
+                        <input type="text" id="bot-icon-input" class="form-control" placeholder="Ej: 🕯️, 🤖, 👾, ⚡" value="🕯️">
+                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                            Puedes usar emojis o texto. El icono se mostrará en el sidebar y en mensajes del bot.
+                        </div>
+                    </div>
+                    <button onclick="saveBotIcon()" class="btn-primary">
+                        <i class="fas fa-save"></i> Guardar Icono
+                    </button>
+                </div>
+            </div>
+            <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <button class="btn-icon btn-sm" onclick="setIcon('🕯️')">🕯️</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('🤖')">🤖</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('👾')">👾</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('⚡')">⚡</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('🔥')">🔥</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('🌟')">🌟</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('🎯')">🎯</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('🚀')">🚀</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('💀')">💀</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('👁️')">👁️</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('🐉')">🐉</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('🌙')">🌙</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('☀️')">☀️</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('🍀')">🍀</button>
+                <button class="btn-icon btn-sm" onclick="setIcon('🎵')">🎵</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-link"></i>
+            <h3>Redes Sociales</h3>
+        </div>
+        <div class="card-body">
+            <form id="social-form">
+                <div class="form-group">
+                    <label><i class="fab fa-discord"></i> Discord</label>
+                    <input type="url" id="social-discord" class="form-control" placeholder="https://discord.gg/invite">
+                </div>
+                <div class="form-group">
+                    <label><i class="fab fa-twitter"></i> Twitter</label>
+                    <input type="url" id="social-twitter" class="form-control" placeholder="https://twitter.com/usuario">
+                </div>
+                <div class="form-group">
+                    <label><i class="fab fa-instagram"></i> Instagram</label>
+                    <input type="url" id="social-instagram" class="form-control" placeholder="https://instagram.com/usuario">
+                </div>
+                <div class="form-group">
+                    <label><i class="fab fa-youtube"></i> YouTube</label>
+                    <input type="url" id="social-youtube" class="form-control" placeholder="https://youtube.com/c/canal">
+                </div>
+                <div class="form-group">
+                    <label><i class="fab fa-tiktok"></i> TikTok</label>
+                    <input type="url" id="social-tiktok" class="form-control" placeholder="https://tiktok.com/@usuario">
+                </div>
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-save"></i> Guardar Enlaces
+                </button>
+            </form>
+            <div id="social-message" class="alert" style="display:none;margin-top:12px;"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-key"></i>
+            <h3>Cambiar Contraseña</h3>
+        </div>
+        <div class="card-body">
+            <form id="password-form">
+                <div class="form-group">
+                    <label>Contraseña actual</label>
+                    <input type="password" id="current-password" class="form-control" placeholder="Ingresa tu contraseña actual">
+                </div>
+                <div class="form-group">
+                    <label>Nueva contraseña</label>
+                    <input type="password" id="new-password" class="form-control" placeholder="Mínimo 6 caracteres">
+                </div>
+                <div class="form-group">
+                    <label>Confirmar nueva</label>
+                    <input type="password" id="confirm-password" class="form-control" placeholder="Repite la nueva contraseña">
+                </div>
+                <button type="submit" class="btn-primary">
+                    <i class="fas fa-key"></i> Cambiar Contraseña
+                </button>
+            </form>
+            <div id="password-message" class="alert" style="display:none;margin-top:12px;"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+function setIcon(icon) {
+    document.getElementById('bot-icon-input').value = icon;
+    document.getElementById('icon-preview').textContent = icon;
+}
+
+function saveBotIcon() {
+    const icon = document.getElementById('bot-icon-input').value.trim();
+    if (!icon) {
+        showToast('❌ El icono no puede estar vacío', 'error');
+        return;
+    }
+    
+    fetch('/api/settings/bot-icon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ icon })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            showToast('✅ Icono actualizado correctamente', 'success');
+            // Actualizar sidebar
+            document.querySelector('.brand-icon').textContent = icon;
+        } else {
+            showToast('❌ Error: ' + (data.error || 'No se pudo actualizar'), 'error');
+        }
+    })
+    .catch(() => showToast('❌ Error al actualizar icono', 'error'));
+}
+
+function loadSocialLinks() {
+    fetch('/api/settings/social')
+        .then(res => res.json())
+        .then(links => {
+            document.getElementById('social-discord').value = links.discord || '';
+            document.getElementById('social-twitter').value = links.twitter || '';
+            document.getElementById('social-instagram').value = links.instagram || '';
+            document.getElementById('social-youtube').value = links.youtube || '';
+            document.getElementById('social-tiktok').value = links.tiktok || '';
+        })
+        .catch(err => console.error('Error cargando enlaces:', err));
+}
+
+function loadBotIcon() {
+    fetch('/api/settings/bot-icon')
+        .then(res => res.json())
+        .then(data => {
+            if (data.icon) {
+                document.getElementById('bot-icon-input').value = data.icon;
+                document.getElementById('icon-preview').textContent = data.icon;
+                document.querySelector('.brand-icon').textContent = data.icon;
+            }
+        })
+        .catch(() => {});
+}
+
+function showToast(message, type) {
+    if (typeof window.showToast === 'function') {
+        window.showToast(message, type);
+    } else {
+        alert(message);
+    }
+}
+
+loadSocialLinks();
+loadBotIcon();
+
+// Guardar enlaces sociales
+document.getElementById('social-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const platforms = ['discord', 'twitter', 'instagram', 'youtube', 'tiktok'];
+    let saved = 0;
+    let total = platforms.length;
+    let hasError = false;
+    
+    platforms.forEach(platform => {
+        const url = document.getElementById(`social-${platform}`).value.trim();
+        if (url) {
+            fetch('/api/settings/social', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform, url })
+            })
+            .then(res => res.json())
+            .then(data => {
+                saved++;
+                if (data.error) hasError = true;
+                if (saved === total) {
+                    if (hasError) {
+                        showToast('⚠️ Algunos enlaces no se pudieron actualizar', 'warning');
+                    } else {
+                        showToast('✅ Todos los enlaces sociales actualizados correctamente', 'success');
+                    }
+                    loadSocialLinks();
+                }
+            })
+            .catch(() => {
+                saved++;
+                hasError = true;
+                if (saved === total) {
+                    showToast('⚠️ Algunos enlaces no se pudieron actualizar', 'warning');
+                }
+            });
+        } else {
+            saved++;
+            if (saved === total) {
+                if (hasError) {
+                    showToast('⚠️ Algunos enlaces no se pudieron actualizar', 'warning');
+                } else {
+                    showToast('✅ Enlaces actualizados', 'success');
+                }
+            }
+        }
+    });
+});
+
+// Cambiar contraseña
+document.getElementById('password-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const current = document.getElementById('current-password').value;
+    const newPass = document.getElementById('new-password').value;
+    const confirm = document.getElementById('confirm-password').value;
+    
+    if (newPass !== confirm) {
+        showToast('❌ Las contraseñas no coinciden', 'error');
+        return;
+    }
+    
+    if (newPass.length < 6) {
+        showToast('❌ La nueva contraseña debe tener al menos 6 caracteres', 'error');
+        return;
+    }
+    
+    fetch('/api/settings/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current, new: newPass })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) {
+            showToast('❌ ' + data.error, 'error');
+        } else {
+            showToast('✅ Contraseña actualizada correctamente', 'success');
+            document.getElementById('current-password').value = '';
+            document.getElementById('new-password').value = '';
+            document.getElementById('confirm-password').value = '';
+        }
+    })
+    .catch(err => {
+        showToast('❌ Error al cambiar la contraseña', 'error');
+    });
+});
+</script>
+{% endblock %}

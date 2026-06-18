@@ -7,6 +7,9 @@ import re
 from collections import defaultdict
 from typing import Dict, Tuple, Optional
 
+from services.config_service import config_service
+from services.warning_manager import warning_manager
+from services.log_service import log_service
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -19,62 +22,77 @@ class AntiSpam:
         # Configuración
         self.MAX_MESSAGES_PER_MINUTE = 15
         self.MAX_SIMILAR_MESSAGES = 3
-        self.MAX_CAPS_RATIO = 0.7  # 70% mayúsculas = spam
-        self.MIN_MESSAGE_LENGTH = 5
+        self.MAX_CAPS_RATIO = 0.7
+        self.MIN_MESSAGE_LENGTH = 3
         
         # Almacenamiento temporal
-        self.user_messages: Dict[str, list] = defaultdict(list)  # {user: [timestamps]}
-        self.user_last_message: Dict[str, str] = {}  # {user: last_message}
+        self.user_messages: Dict[str, list] = defaultdict(list)
+        self.user_last_message: Dict[str, str] = {}
         self.user_similar_count: Dict[str, int] = defaultdict(int)
         
         # Palabras prohibidas
-        self.banned_words = self._load_banned_words()
+        self.banned_words = set()
+        self._load_banned_words()
+        
+        # Registrar callback para cambios en config_service
+        config_service.on_change(self._load_banned_words)
     
-    def _load_banned_words(self) -> set:
-        """Cargar palabras prohibidas"""
-        # Palabras comunes ofensivas (ejemplo)
-        return {
-            "puta", "mierda", "coño", "joder", "cabron", "gilipollas",
-            "hijodeputa", "pendejo", "marica", "verga", "carajo",
-            # Agrega más según necesites
-        }
+    def _load_banned_words(self):
+        """Cargar palabras prohibidas desde config_service"""
+        try:
+            words = config_service.get_banned_words()
+            self.banned_words = set(word.lower() for word in words)
+            logger.debug(f"Palabras prohibidas cargadas: {len(self.banned_words)}")
+            log_service.add_log('info', f'Palabras prohibidas cargadas: {len(self.banned_words)}', 'anti_spam')
+        except Exception as e:
+            logger.error(f"Error cargando palabras prohibidas: {e}")
+            log_service.add_log('error', f'Error cargando palabras prohibidas: {e}', 'anti_spam')
+            self.banned_words = set()
     
     def clean_message(self, text: str) -> str:
         """Limpiar mensaje eliminando emotes y caracteres especiales"""
-        # Eliminar emotes de Twitch comunes
         text = re.sub(r'[^\w\s]', '', text)
         return text.lower()
     
-    def check_message(self, user_id: str, message: str) -> Tuple[bool, Optional[str]]:
+    def check_message(self, user_id: str, message: str, is_vip: bool = False, is_staff: bool = False) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
         """
-        Verificar si un mensaje es spam
+        Verificar si un mensaje es spam y devolver acción a tomar.
         
         Returns:
-            (is_spam, reason)
+            (is_spam, action, warning_type, reason)
+            action: 'warning', 'timeout', 'ban' o None si no es spam
+            warning_type: 'caps', 'rate', 'repeat', 'word'
         """
+        # Staff está exento de todo
+        if is_staff:
+            return False, None, None, None
+        
         current_time = time.time()
         clean_msg = self.clean_message(message)
         
         # 1. Verificar mensajes vacíos o muy cortos
         if len(clean_msg) < self.MIN_MESSAGE_LENGTH:
-            return False, None
+            return False, None, None, None
         
-        # 2. Verificar mayúsculas excesivas
-        caps_count = sum(1 for c in message if c.isupper())
-        caps_ratio = caps_count / len(message) if len(message) > 0 else 0
-        
-        if caps_ratio > self.MAX_CAPS_RATIO and len(message) > 10:
-            return True, "EXCESO_MAYUSCULAS"
+        # 2. Verificar mayúsculas excesivas (solo para no-VIP)
+        if not is_vip:
+            caps_count = sum(1 for c in message if c.isupper())
+            caps_ratio = caps_count / len(message) if len(message) > 0 else 0
+            
+            if caps_ratio > self.MAX_CAPS_RATIO and len(message) > 10:
+                log_service.add_log('warning', f'Exceso de mayúsculas detectado de usuario {user_id}', 'anti_spam')
+                action, count = warning_manager.check_and_get_action(user_id, 'caps')
+                return True, action, 'caps', f"EXCESO_MAYUSCULAS (advertencia {count})"
         
         # 3. Verificar rate limit (mensajes por minuto)
         user_timestamps = self.user_messages[user_id]
-        
-        # Limpiar timestamps viejos (más de 60 segundos)
         user_timestamps = [ts for ts in user_timestamps if current_time - ts < 60]
         self.user_messages[user_id] = user_timestamps
         
         if len(user_timestamps) >= self.MAX_MESSAGES_PER_MINUTE:
-            return True, "RATE_LIMIT"
+            log_service.add_log('warning', f'Rate limit excedido para usuario {user_id}', 'anti_spam')
+            action, count = warning_manager.check_and_get_action(user_id, 'rate')
+            return True, action, 'rate', f"RATE_LIMIT (advertencia {count})"
         
         # 4. Verificar mensajes repetidos
         last_msg = self.user_last_message.get(user_id, "")
@@ -84,22 +102,32 @@ class AntiSpam:
             
             if self.user_similar_count[user_id] >= self.MAX_SIMILAR_MESSAGES:
                 self.user_similar_count[user_id] = 0
-                return True, "MENSAJE_REPETIDO"
+                log_service.add_log('warning', f'Mensaje repetido detectado de usuario {user_id}', 'anti_spam')
+                action, count = warning_manager.check_and_get_action(user_id, 'repeat')
+                return True, action, 'repeat', f"MENSAJE_REPETIDO (advertencia {count})"
         else:
             self.user_similar_count[user_id] = 0
         
-        # 5. Verificar palabras prohibidas
-        words = clean_msg.split()
-        for word in words:
-            if word in self.banned_words:
-                return True, f"PALABRA_PROHIBIDA: {word}"
+        # 5. Verificar palabras prohibidas (VIPs están exentos)
+        if not is_vip and self.banned_words:
+            words = clean_msg.split()
+            for word in words:
+                if word in self.banned_words:
+                    log_service.add_log('warning', f'Palabra prohibida "{word}" detectada de usuario {user_id}', 'anti_spam')
+                    action, count = warning_manager.check_and_get_action(user_id, 'word')
+                    return True, action, 'word', f"PALABRA_PROHIBIDA: {word} (advertencia {count})"
         
         # Actualizar registros
         self.user_messages[user_id].append(current_time)
         self.user_last_message[user_id] = clean_msg
         
-        return False, None
+        return False, None, None, None
+    
+    def reload_banned_words(self):
+        """Recargar palabras prohibidas (público)"""
+        self._load_banned_words()
+        logger.info(f"🔄 Palabras prohibidas recargadas: {len(self.banned_words)}")
+        log_service.add_log('info', f'Palabras prohibidas recargadas: {len(self.banned_words)}', 'anti_spam')
 
 
-# Instancia global
 anti_spam = AntiSpam()

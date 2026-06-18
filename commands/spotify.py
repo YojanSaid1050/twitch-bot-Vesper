@@ -25,44 +25,38 @@ def setup_spotify_commands(bot):
         parts = ctx.message.content.split(" ", 1)
         
         if len(parts) < 2:
-            await ctx.send("🕯️ Uso: !sr <nombre de canción o artista>")
+            await ctx.send("🕯️ El susurro necesita un nombre: !sr <canción o artista>")
             await ctx.send("🎵 Ejemplo: !sr Bohemian Rhapsody")
             return
         
         query = parts[1].strip()
         
-        # Verificar que Spotify está configurado
         if not spotify_service.sp:
-            await ctx.send("❌ Spotify no está configurado. Contacta al streamer.")
+            await ctx.send("❌ El portal musical está cerrado... el invocador debe abrirlo primero.")
             return
         
-        await ctx.send(f"🎵 Buscando '{query}' en el abismo...")
+        await ctx.send(f"🔮 Rastreando '{query}' en la memoria del vacío...")
         
-        # Buscar la canción
         track = spotify_service.search_track(query)
         
         if not track:
-            await ctx.send(f"❌ El eco no responde... '{query}' no se encontró en el reino musical.")
+            await ctx.send(f"❌ El vacío no guarda esa melodía... '{query}' no está en los anales.")
             return
         
-        # Verificar si ya está en la cola
         if spotify_service.is_track_in_queue(track['id']):
-            await ctx.send(f"⚠️ {track['name']} - {track['artist']} ya aguarda en la cola del ritual. No se puede conjurar dos veces la misma melodía.")
+            await ctx.send(f"⚠️ {track['name']} - {track['artist']} ya aguarda su turno en la cola del ritual. No se puede conjurar dos veces la misma melodía.")
             return
         
-        # Verificar si ya fue reproducida recientemente
         in_history, position = spotify_service.is_track_in_history(track['id'])
         
         if in_history:
-            # Calcular cuántas canciones faltan para que salga del historial
             remaining = 10 - position + 1
             await ctx.send(
                 f"⚠️ {track['name']} - {track['artist']} ya resonó en el altar recientemente. "
-                f"El eco aún perdura, espera un poco. ({remaining} canciones para conjurarla de nuevo)"
+                f"El eco aún perdura, espera un poco. ({remaining} cantos para conjurarla de nuevo)"
             )
             return
         
-        # Añadir a la cola
         success = spotify_service.add_to_queue(track['id'], track)
         
         if success:
@@ -71,19 +65,19 @@ def setup_spotify_commands(bot):
             duration_sec = duration_seconds % 60
             
             await ctx.send(
-                f"🎵 {ctx.author.name} ha conjurado {track['name']} - {track['artist']} "
+                f"🎵 {ctx.author.name} ha invocado {track['name']} - {track['artist']} "
                 f"({duration_min}:{duration_sec:02d}) en la cola del ritual 🕯️"
             )
         else:
             await ctx.send(
-                f"⚠️ El hechizo falló... Asegúrate de que Spotify esté abierto y la música fluya en el altar."
+                f"⚠️ El hechizo falló... Asegúrate de que el portal de Spotify esté abierto y la música fluya en el altar."
             )
     
     @bot.command(name="current", aliases=["nowplaying", "np"])
     async def current_track(ctx: commands.Context):
         """Mostrar canción actual de Spotify (todos pueden usar)"""
         if not spotify_service.sp:
-            await ctx.send("❌ Spotify no está configurado en el reino.")
+            await ctx.send("❌ El altar de Spotify no está invocado.")
             return
         
         track = spotify_service.get_current_track()
@@ -96,14 +90,13 @@ def setup_spotify_commands(bot):
     @bot.command(name="skip", aliases=["next"])
     async def skip_track(ctx: commands.Context):
         """Saltar a la siguiente canción (solo mods, VIP y streamer)"""
-        # Verificar nivel de permiso (mod, VIP o streamer)
         user_level = permission_checker.get_user_level(ctx.message)
         if user_level < PermissionLevel.VIP:
             await ctx.send("🕯️ Solo los elegidos (VIP, mods o el invocador) pueden invocar el siguiente encantamiento.")
             return
         
         if not spotify_service.sp:
-            await ctx.send("❌ Spotify no está configurado en el reino.")
+            await ctx.send("❌ El altar de Spotify no está invocado.")
             return
         
         success = spotify_service.skip_track()
@@ -116,14 +109,13 @@ def setup_spotify_commands(bot):
     @bot.command(name="pause")
     async def pause_playback(ctx: commands.Context):
         """Pausar la música (solo mods, VIP y streamer)"""
-        # Verificar nivel de permiso (mod, VIP o streamer)
         user_level = permission_checker.get_user_level(ctx.message)
         if user_level < PermissionLevel.VIP:
             await ctx.send("🕯️ Solo los elegidos (VIP, mods o el invocador) pueden pausar el ritual.")
             return
         
         if not spotify_service.sp:
-            await ctx.send("❌ Spotify no está configurado en el reino.")
+            await ctx.send("❌ El altar de Spotify no está invocado.")
             return
         
         if not spotify_service.is_playing():
@@ -140,14 +132,13 @@ def setup_spotify_commands(bot):
     @bot.command(name="resume", aliases=["play"])
     async def resume_playback(ctx: commands.Context):
         """Reanudar la música (solo mods, VIP y streamer)"""
-        # Verificar nivel de permiso (mod, VIP o streamer)
         user_level = permission_checker.get_user_level(ctx.message)
         if user_level < PermissionLevel.VIP:
             await ctx.send("🕯️ Solo los elegidos (VIP, mods o el invocador) pueden reanudar el ritual.")
             return
         
         if not spotify_service.sp:
-            await ctx.send("❌ Spotify no está configurado en el reino.")
+            await ctx.send("❌ El altar de Spotify no está invocado.")
             return
         
         if spotify_service.is_playing():

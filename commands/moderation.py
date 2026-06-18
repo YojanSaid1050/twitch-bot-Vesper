@@ -26,7 +26,7 @@ def setup_moderation_commands(bot):
         
         if len(parts) < 2:
             await ctx.send("🕯️ Uso: !slow 10 o !slow off")
-            await ctx.send("Ejemplo: !slow 30 (30 segundos entre mensajes)")
+            await ctx.send("Ejemplo: !slow 30 (30 segundos entre susurros)")
             return
         
         value = parts[1].lower()
@@ -34,17 +34,15 @@ def setup_moderation_commands(bot):
         try:
             if value == "off":
                 await chat_settings.set_slow_mode(False)
-                await ctx.send("⏳ Speech is unbound... slow mode disabled.")
+                await ctx.send("⏳ El tiempo se libera... modo lento desactivado.")
             else:
                 seconds = int(value)
                 is_valid, error_msg = validate_slow_mode_time(seconds)
-                
                 if not is_valid:
                     await ctx.send(f"❌ {error_msg}")
                     return
-                
                 await chat_settings.set_slow_mode(True, seconds)
-                await ctx.send(f"⏳ Speech is bound by ash… slow mode is now enforced ({seconds}s).")
+                await ctx.send(f"⏳ El tiempo se vuelve lento... el ritual se pausa {seconds} segundos entre cada susurro.")
         except ValueError:
             await ctx.send("❌ El tiempo debe ser un número. Ejemplo: !slow 10")
         except ValidationError as e:
@@ -70,17 +68,15 @@ def setup_moderation_commands(bot):
         try:
             if value == "off":
                 await chat_settings.set_follower_mode(False)
-                await ctx.send("🕯️ The gates open... follower restriction removed.")
+                await ctx.send("🚪 Las puertas se abren... restricción de seguidores removida.")
             else:
                 minutes = int(value)
                 is_valid, error_msg = validate_follower_duration(minutes)
-                
                 if not is_valid:
                     await ctx.send(f"❌ {error_msg}")
                     return
-                
                 await chat_settings.set_follower_mode(True, minutes)
-                await ctx.send(f"🕯️ The gates tighten… follower restriction active ({minutes} minutes).")
+                await ctx.send(f"🚪 El umbral se guarda... solo almas que sigan al invocador desde hace {minutes} minutos pueden entrar.")
         except ValueError:
             await ctx.send("❌ El tiempo debe ser un número. Ejemplo: !followers 5")
         except ValidationError as e:
@@ -110,7 +106,7 @@ def setup_moderation_commands(bot):
         
         try:
             await chat_settings.set_emote_mode(enabled)
-            await ctx.send("🫥 Expression reduced to echoes only (emotes updated).")
+            await ctx.send("😶 El lenguaje se transforma en iconos... solo ecos visuales a partir de ahora.")
         except TwitchAPIError as e:
             await ctx.send(f"❌ Error: {e.message}")
     
@@ -136,13 +132,9 @@ def setup_moderation_commands(bot):
         
         try:
             await chat_settings.set_subscriber_mode(enabled)
-            await ctx.send("📜 Only the chosen may speak… subscriber veil updated.")
+            await ctx.send("👑 El velo de los suscriptores se alza... solo los elegidos pueden alzar la voz.")
         except TwitchAPIError as e:
             await ctx.send(f"❌ Error: {e.message}")
-    
-    # ============================================
-    # COMANDOS DE MODERACIÓN CON ARGUMENTOS FLEXIBLES
-    # ============================================
     
     @bot.command(name="timeout")
     async def timeout_command(ctx: commands.Context):
@@ -159,14 +151,10 @@ def setup_moderation_commands(bot):
             await ctx.send("          !timeout @spammer No hacer spam (10 min por defecto)")
             return
         
-        # Extraer usuario (quitar @ si tiene)
         username = parts[1].lstrip('@')
-        
-        # Duración por defecto: 600 segundos (10 minutos)
         duration = 600
         reason_parts = []
         
-        # Analizar argumentos - soporta !timeout @user razón y !timeout @user 60 razón
         found_duration = False
         for part in parts[2:]:
             if not found_duration and part.isdigit():
@@ -175,7 +163,6 @@ def setup_moderation_commands(bot):
             else:
                 reason_parts.append(part)
         
-        # Validar duración
         if duration < 1:
             duration = 1
             await ctx.send("⚠️ Duración muy baja, usando 1 segundo")
@@ -188,7 +175,6 @@ def setup_moderation_commands(bot):
         try:
             await mod_actions.timeout(username, duration, reason)
             
-            # Formatear mensaje
             if duration >= 86400:
                 duration_str = f"{duration // 86400} días"
             elif duration >= 3600:
@@ -200,7 +186,7 @@ def setup_moderation_commands(bot):
             
             await ctx.send(f"🔇 {username} ha sido silenciado por {duration_str}. Razón: {reason}")
         except ResourceNotFoundError:
-            await ctx.send(f"❌ Usuario {username} no encontrado")
+            await ctx.send(f"❌ Usuario {username} no encontrado en los anales")
         except TwitchAPIError as e:
             await ctx.send(f"❌ Error de Twitch: {e.message}")
     

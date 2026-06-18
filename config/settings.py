@@ -127,17 +127,14 @@ class Settings:
         
         missing = [name for name, value in required if not value]
         
-        # Los refresh tokens son opcionales
         if not self.BOT_REFRESH_TOKEN:
             print("⚠️ BOT_REFRESH_TOKEN no configurado. Los tokens expirarán cada 4 horas.")
         if not self.BROADCASTER_REFRESH_TOKEN:
             print("⚠️ BROADCASTER_REFRESH_TOKEN no configurado. Los tokens expirarán cada 4 horas.")
         
-        # App Token es opcional (solo para EventSub)
         if not self.APP_ACCESS_TOKEN:
             print("⚠️ APP_ACCESS_TOKEN no configurado. Las notificaciones de subs/raids no funcionarán.")
         
-        # EventSub es opcional
         if not self.EVENTSUB_CALLBACK_URL:
             print("⚠️ EVENTSUB_CALLBACK_URL no configurado. Las notificaciones automáticas no funcionarán.")
         if not self.TWITCH_WEBHOOK_SECRET:

@@ -22,6 +22,6 @@ def setup_stats_commands(bot):
         viewers = await stats_service.get_viewer_count()
         
         if viewers == 0:
-            await ctx.send("👁️ El stream no está en vivo o no hay espectadores...")
+            await ctx.send("👁️ El altar yace en silencio... ningún alma contempla el ritual.")
         else:
-            await ctx.send(f"👁️ {viewers} {'alma observa' if viewers == 1 else 'almas observan'} el ritual")
+            await ctx.send(f"👁️ {viewers} {'alma' if viewers == 1 else 'almas'} presencia{'n' if viewers != 1 else ''} el ritual en este momento.")

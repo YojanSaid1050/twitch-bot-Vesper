@@ -5,10 +5,14 @@ from .moderation_actions import ModerationActions
 from .commercial import CommercialManager
 from .stats_service import stats_service
 from .warns_system import warns_system
-from .custom_commands import custom_commands_service
 from .token_manager import token_manager
+from .config_service import config_service
+from .service_manager import service_manager
+from .link_manager import link_manager
+from .notification_service import notification_service
+from .eventsub_service import eventsub_service
+from .clip_service import clip_service
 
-# Spotify es opcional
 try:
     from .spotify_service import spotify_service
 except ImportError:
@@ -22,7 +26,12 @@ __all__ = [
     "CommercialManager",
     "stats_service",
     "warns_system",
-    "custom_commands_service",
     "token_manager",
+    "config_service",
+    "service_manager",
+    "link_manager",
+    "notification_service",
+    "eventsub_service",
+    "clip_service",
     "spotify_service",
 ]

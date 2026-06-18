@@ -4,27 +4,22 @@ Servicio para manejar EventSub de Twitch
 
 import asyncio
 import requests
-import threading
-from flask import Flask, request, jsonify
 from typing import Optional, Dict
 
 from config import settings
 from services.notification_service import notification_service
 from utils.logger import get_logger
+from services.log_service import log_service
 
 logger = get_logger(__name__)
 
-
 class EventSubService:
-    """Servicio para recibir eventos via webhook local"""
+    """Servicio para recibir eventos via webhook (ahora gestionado por el dashboard)"""
     
     def __init__(self):
         self.bot = None
         self.channel = None
-        self.webhook_port = settings.BOT_WEBHOOK_PORT
-        self.app = None
-        self.server_thread = None
-        self.is_running = False
+        # Eliminados: webhook_port, app, server_thread, is_running
         
     def set_bot(self, bot):
         """Establecer referencia al bot"""
@@ -32,47 +27,10 @@ class EventSubService:
         if bot.connected_channels:
             self.channel = bot.connected_channels[0]
         notification_service.set_bot(bot)
-    
-    def start_webhook_server(self):
-        """Iniciar servidor webhook local"""
-        if self.is_running:
-            return
-        
-        self.app = Flask(__name__)
-        
-        @self.app.route('/webhook', methods=['POST'])
-        def handle_webhook():
-            """Recibir eventos del servidor público"""
-            data = request.json
-            event_type = data.get('type')
-            event_data = data.get('data', {})
-            
-            logger.info(f"📨 Evento recibido: {event_type}")
-            
-            # Procesar evento
-            if self.bot and self.channel:
-                self._process_event(event_type, event_data)
-            
-            return jsonify({"status": "ok"}), 200
-        
-        @self.app.route('/health', methods=['GET'])
-        def health():
-            return jsonify({"status": "alive"}), 200
-        
-        def run_server():
-            try:
-                self.app.run(host='0.0.0.0', port=self.webhook_port, debug=False, use_reloader=False, threaded=True)
-            except Exception as e:
-                logger.error(f"Error en servidor webhook: {e}")
-        
-        self.server_thread = threading.Thread(target=run_server, daemon=True)
-        self.server_thread.start()
-        self.is_running = True
-        logger.info(f"✅ Servidor webhook local iniciado en puerto {self.webhook_port}")
+        log_service.add_log('info', 'EventSub service vinculado al bot', 'eventsub_service')
     
     def _process_event(self, event_type: str, event_data: Dict):
-        """Procesar evento y enviar notificación al chat"""
-        
+        """Procesar evento y enviar notificación al chat (estilo místico)"""
         async def send_notification():
             try:
                 if not self.channel:
@@ -82,7 +40,6 @@ class EventSubService:
                     user_name = event_data.get("user_name", event_data.get("user_login", "Alguien"))
                     tier = event_data.get("tier", "1000")
                     is_gift = event_data.get("is_gift", False)
-                    
                     if not is_gift:
                         await notification_service.on_subscribe(self.channel, user_name, tier, "sub")
                 
@@ -90,9 +47,9 @@ class EventSubService:
                     user_name = event_data.get("user_name", event_data.get("user_login", "Alguien"))
                     total = event_data.get("total", 1)
                     tier = event_data.get("tier", "1000")
-                    
-                    message = f"🎁 {user_name} ha regalado {total} suscripción(es) Tier {tier}! ¡Qué generosidad ilumina el altar! 🕯️"
+                    message = f"🎁 {user_name} ha ofrendado {total} suscripción(es) Tier {tier}! El altar se ilumina con su generosidad. 🕯️"
                     await self.channel.send(message)
+                    log_service.add_log('info', f'Gift subs: {user_name} regaló {total} suscripciones', 'eventsub_service')
                 
                 elif event_type == "channel.raid":
                     from_broadcaster = event_data.get("from_broadcaster_user_name", "Alguien")
@@ -102,11 +59,13 @@ class EventSubService:
                 elif event_type == "channel.cheer":
                     user_name = event_data.get("user_name", "Alguien")
                     bits = event_data.get("bits", 0)
-                    message = f"💎 {user_name} ha lanzado {bits} bits al altar! 🔥"
+                    message = f"💎 {user_name} ha derramado {bits} bits sobre el altar! El poder fluye. 🔥"
                     await self.channel.send(message)
+                    log_service.add_log('info', f'Cheer: {user_name} envió {bits} bits', 'eventsub_service')
                     
             except Exception as e:
                 logger.error(f"Error enviando notificación: {e}")
+                log_service.add_log('error', f'Error enviando notificación: {e}', 'eventsub_service')
         
         if self.bot and self.bot.loop:
             asyncio.run_coroutine_threadsafe(send_notification(), self.bot.loop)
@@ -114,15 +73,15 @@ class EventSubService:
     def subscribe_to_events(self):
         """Suscribirse a eventos via API de Twitch (solo los que funcionan)"""
         app_token = getattr(settings, 'APP_ACCESS_TOKEN', '')
-        
         if not app_token:
             logger.error("❌ No hay APP_ACCESS_TOKEN configurado")
+            log_service.add_log('error', 'No hay APP_ACCESS_TOKEN configurado para EventSub', 'eventsub_service')
             return
         
         callback_url = settings.EVENTSUB_CALLBACK_URL
-        
         if not callback_url:
             logger.error("❌ EVENTSUB_CALLBACK_URL no configurado")
+            log_service.add_log('error', 'EVENTSUB_CALLBACK_URL no configurado', 'eventsub_service')
             return
         
         headers = {
@@ -131,7 +90,6 @@ class EventSubService:
             "Content-Type": "application/json"
         }
         
-        # Solo eventos que funcionan con App Token
         events = [
             ("channel.subscribe", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
             ("channel.subscription.gift", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
@@ -139,6 +97,7 @@ class EventSubService:
         ]
         
         logger.info(f"📡 Suscribiendo a eventos via {callback_url}")
+        log_service.add_log('info', f'Suscribiendo a eventos via {callback_url}', 'eventsub_service')
         
         for event_type, version, condition in events:
             subscription = {
@@ -147,7 +106,7 @@ class EventSubService:
                 "condition": condition,
                 "transport": {
                     "method": "webhook",
-                    "callback": f"{callback_url}/webhook/twitch",
+                    "callback": f"{callback_url}/webhook/twitch",  # Ahora apunta al dashboard
                     "secret": settings.TWITCH_WEBHOOK_SECRET
                 }
             }
@@ -158,15 +117,17 @@ class EventSubService:
                     headers=headers,
                     json=subscription
                 )
-                
                 if response.status_code == 202:
                     logger.info(f"✅ Suscrito a {event_type} (v{version})")
+                    log_service.add_log('info', f'Suscrito a {event_type}', 'eventsub_service')
                 elif response.status_code == 409:
                     logger.info(f"ℹ️ Ya suscrito a {event_type}")
                 else:
                     logger.error(f"❌ Error en {event_type}: {response.status_code}")
+                    log_service.add_log('error', f'Error suscribiendo a {event_type}: {response.status_code}', 'eventsub_service')
             except Exception as e:
                 logger.error(f"Error en {event_type}: {e}")
+                log_service.add_log('error', f'Error en {event_type}: {e}', 'eventsub_service')
         
         # Iniciar polling para follows
         if self.bot and self.bot.loop:
@@ -176,14 +137,12 @@ class EventSubService:
             )
     
     async def _start_follow_polling(self):
-        """Iniciar polling de follows"""
         notification_service.start_follow_polling()
     
     def stop(self):
-        """Detener servidor webhook"""
-        self.is_running = False
-        logger.info("🛑 Servidor webhook detenido")
-
+        """Detener (ya no hay servidor webhook)"""
+        logger.info("🛑 EventSub detenido")
+        log_service.add_log('info', 'EventSub detenido', 'eventsub_service')
 
 # Instancia global
 eventsub_service = EventSubService()

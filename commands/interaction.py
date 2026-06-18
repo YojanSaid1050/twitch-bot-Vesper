@@ -17,7 +17,7 @@ def setup_interaction_commands(bot):
         parts = ctx.message.content.split(" ", 1)
         
         if len(parts) < 2:
-            await ctx.send("🕯️ Hazme una pregunta: !8ball ¿Voy a ganar hoy?")
+            await ctx.send("🕯️ Conjura tu pregunta al vacío: !8ball ¿Voy a ganar hoy?")
             return
         
         question = parts[1]
@@ -25,25 +25,19 @@ def setup_interaction_commands(bot):
         respuestas = [
             "✨ Sí, definitivamente.", "🔮 Sin duda alguna.",
             "✅ Es cierto.", "🎯 Sí, confía en ello.",
-            "👍 Respuesta confusa, intenta de nuevo.",
+            "🤔 Respuesta confusa, intenta de nuevo.",
             "❓ Pregunta de nuevo más tarde.",
             "🚫 No cuentes con ello.", "🌙 Mis fuentes dicen que no.",
             "💀 Muy dudoso.", "⚡ El silencio dice que no."
         ]
         
-        await ctx.send(f"🎱 {ctx.author.name}: {question} → {random.choice(respuestas)}")
+        await ctx.send(f"🔮 {ctx.author.name}: {question} → {random.choice(respuestas)}")
     
     @bot.command(name="dado", aliases=["roll", "dice"])
     async def roll_dice(ctx: commands.Context):
         """Lanza un dado de 1-6"""
         result = random.randint(1, 6)
-        
-        # Emotes según el resultado
-        emotes = {
-            1: "⚀", 2: "⚁", 3: "⚂",
-            4: "⚃", 5: "⚄", 6: "⚅"
-        }
-        
+        emotes = {1: "⚀", 2: "⚁", 3: "⚂", 4: "⚃", 5: "⚄", 6: "⚅"}
         await ctx.send(f"🎲 {ctx.author.name} lanzó el dado: {emotes[result]} {result}")
     
     @bot.command(name="moneda", aliases=["coin", "caraocruz"])
@@ -73,9 +67,9 @@ def setup_interaction_commands(bot):
     @bot.command(name="lurk", aliases=["modolurk"])
     async def lurk_mode(ctx: commands.Context):
         """Activar modo ausente"""
-        await ctx.send(f"🥷 {ctx.author.name} está en modo lurk. ¡Que la oscuridad te acompañe!")
+        await ctx.send(f"🌑 {ctx.author.name} se sumerge en las sombras. Que la oscuridad te proteja.")
     
     @bot.command(name="unlurk", aliases=["regresar"])
     async def unlurk_mode(ctx: commands.Context):
         """Desactivar modo ausente"""
-        await ctx.send(f"👁️ {ctx.author.name} ha regresado de las sombras...")
+        await ctx.send(f"👁️ {ctx.author.name} ha regresado de las tinieblas...")

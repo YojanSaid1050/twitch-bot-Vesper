@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}VesperBot - Comandos{% endblock %}
+{% block header %}Gestión de Comandos{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-plus-circle"></i>
+        <h3>Crear Comando</h3>
+    </div>
+    <div class="card-body">
+        <form id="add-command-form" class="form-inline">
+            <div class="form-group">
+                <label>Nombre:</label>
+                <input type="text" id="cmd-name" placeholder="ej: reglas" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Respuesta:</label>
+                <input type="text" id="cmd-response" placeholder="Texto del comando" class="form-control">
+            </div>
+            <div class="form-group">
+                <label>Cooldown (s):</label>
+                <input type="number" id="cmd-cooldown" value="0" 
+                       style="width:80px; background: var(--bg-primary); border: 1px solid var(--border-color); 
+                              border-radius: 6px; color: var(--text-primary); padding: 4px 8px; font-size: 14px;
+                              -moz-appearance: textfield; appearance: textfield;">
+            </div>
+            <button type="submit" class="btn-primary">
+                <i class="fas fa-plus"></i> Crear
+            </button>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-list"></i>
+        <h3>Comandos Personalizados</h3>
+        <span class="badge" id="cmd-count">0</span>
+    </div>
+    <div class="card-body">
+        <div class="table-wrapper">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Comando</th>
+                        <th>Respuesta</th>
+                        <th>Cooldown</th>
+                        <th>Creado</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="commands-list">
+                    <tr>
+                        <td colspan="5" class="text-center">Cargando comandos...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+let autoReloadInterval;
+
+function loadCommands() {
+    fetch('/api/commands')
+        .then(res => {
+            if (!res.ok) throw new Error('Error en la respuesta');
+            return res.json();
+        })
+        .then(commands => {
+            console.log('📊 Comandos recibidos:', commands);
+            const tbody = document.getElementById('commands-list');
+            const count = document.getElementById('cmd-count');
+            
+            if (!commands || commands.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center">No hay comandos personalizados</td></tr>';
+                count.textContent = '0';
+                return;
+            }
+            
+            count.textContent = commands.length;
+            tbody.innerHTML = commands.map(cmd => `
+                <tr>
+                    <td><strong>!${cmd.name}</strong></td>
+                    <td>${cmd.response.substring(0, 50)}${cmd.response.length > 50 ? '...' : ''}</td>
+                    <td>${cmd.cooldown}s</td>
+                    <td>${new Date(cmd.created_at).toLocaleString()}</td>
+                    <td>
+                        <button class="btn-danger btn-sm" onclick="deleteCommand('${cmd.name}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        })
+        .catch(err => {
+            console.error('❌ Error cargando comandos:', err);
+            document.getElementById('commands-list').innerHTML = '<tr><td colspan="5" class="text-center">❌ Error cargando comandos</td></tr>';
+        });
+}
+
+async function deleteCommand(name) {
+    const confirmed = await showModal(
+        '⚠️ Confirmar eliminación',
+        `¿Estás seguro de eliminar el comando !${name}?`,
+        'Eliminar',
+        'Cancelar',
+        'danger'
+    );
+    
+    if (!confirmed) return;
+    
+    fetch(`/api/commands/${name}`, { method: 'DELETE' })
+        .then(res => res.json())
+        .then(data => {
+            if (data.error) {
+                showToast('❌ ' + data.error, 'error');
+            } else {
+                showToast('✅ ' + data.message, 'success');
+                loadCommands();
+            }
+        })
+        .catch(err => {
+            showToast('❌ Error al eliminar comando', 'error');
+            console.error(err);
+        });
+}
+
+document.getElementById('add-command-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const name = document.getElementById('cmd-name').value.trim();
+    const response = document.getElementById('cmd-response').value.trim();
+    const cooldown = parseInt(document.getElementById('cmd-cooldown').value) || 0;
+    
+    if (!name || !response) {
+        showToast('❌ Nombre y respuesta son requeridos', 'error');
+        return;
+    }
+    
+    const submitBtn = this.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creando...';
+    
+    fetch('/api/commands', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, response, cooldown })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) {
+            showToast('❌ ' + data.error, 'error');
+        } else {
+            showToast('✅ ' + data.message, 'success');
+            document.getElementById('cmd-name').value = '';
+            document.getElementById('cmd-response').value = '';
+            document.getElementById('cmd-cooldown').value = '0';
+            loadCommands();
+        }
+    })
+    .catch(err => {
+        showToast('❌ Error al crear comando', 'error');
+        console.error(err);
+    })
+    .finally(() => {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fas fa-plus"></i> Crear';
+    });
+});
+
+// Cargar inicialmente
+loadCommands();
+
+// Recargar automáticamente cada 5 segundos
+autoReloadInterval = setInterval(loadCommands, 5000);
+
+// Limpiar intervalo cuando se navega fuera
+window.addEventListener('beforeunload', function() {
+    if (autoReloadInterval) {
+        clearInterval(autoReloadInterval);
+    }
+});
+</script>
+{% endblock %}

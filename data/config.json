@@ -1,0 +1,94 @@
+{
+    "dashboard": {
+        "enabled": true,
+        "port": 5002,
+        "password": "YojanSaid1050",
+        "session_timeout": 3600
+    },
+    "moderation": {
+        "banned_words": [
+            "paco"
+        ],
+        "max_warnings": 10,
+        "auto_timeout_minutes": 10,
+        "slow_mode": {
+            "enabled": false,
+            "seconds": 23
+        },
+        "follower_mode": {
+            "enabled": false,
+            "minutes": 10
+        },
+        "emote_mode": false,
+        "subscriber_mode": false
+    },
+    "social_links": {
+        "discord": "https://discord.gg/XwFTGuRw",
+        "twitter": "https://twitter.com/",
+        "instagram": "https://instagram.com/xyojansaidx",
+        "youtube": "https://youtube.com/xyojansaidx",
+        "tiktok": "https://tiktok.com/@xyojansaidx"
+    },
+    "spotify": {
+        "enabled": true,
+        "history_limit": 10,
+        "default_volume": 45
+    },
+    "custom_commands": {},
+    "warnings": [],
+    "link_management": {
+        "warnings": {},
+        "warning_users": {},
+        "banned": {},
+        "timeouts": {},
+        "timeout_names": {}
+    },
+    "stats_history": [
+        {
+            "timestamp": "2026-06-17T13:16:29.430517",
+            "followers": 25,
+            "subscribers": 0,
+            "cheers": 0
+        },
+        {
+            "timestamp": "2026-06-17T14:08:52.830394",
+            "followers": 25,
+            "subscribers": 0,
+            "cheers": 0
+        },
+        {
+            "timestamp": "2026-06-17T14:50:53.550311",
+            "followers": 25,
+            "subscribers": 0,
+            "cheers": 0
+        },
+        {
+            "timestamp": "2026-06-17T15:25:04.275221",
+            "followers": 25,
+            "subscribers": 0,
+            "cheers": 0
+        },
+        {
+            "timestamp": "2026-06-17T17:24:10.076840",
+            "followers": 0,
+            "subscribers": 0,
+            "cheers": 0
+        },
+        {
+            "timestamp": "2026-06-17T17:56:05.372579",
+            "followers": 25,
+            "subscribers": 0,
+            "cheers": 0
+        },
+        {
+            "timestamp": "2026-06-17T18:28:20.655632",
+            "followers": 25,
+            "subscribers": 0,
+            "cheers": 0
+        }
+    ],
+    "bot_icon": "🕯️",
+    "warning_manager": {
+        "warnings": {}
+    }
+}

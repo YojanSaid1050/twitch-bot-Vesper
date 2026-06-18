@@ -17,20 +17,17 @@ def setup_stream_commands(bot):
     @bot.command(name="title")
     async def title_command(ctx: commands.Context):
         """Cambiar título del stream (solo staff)"""
-        # Verificar permisos
         if not permission_checker.is_staff(ctx.message):
             return
         
-        # Extraer título (todo después del comando)
         parts = ctx.message.content.split(" ", 1)
         
         if len(parts) < 2:
-            await ctx.send("🕯️ Uso: !title Nuevo título del stream")
+            await ctx.send("🕯️ Uso: !title Nuevo título del ritual")
             return
         
         title = parts[1].strip()
         
-        # Validar título
         is_valid, error_msg = validate_title(title)
         if not is_valid:
             await ctx.send(f"❌ {error_msg}")
@@ -38,7 +35,7 @@ def setup_stream_commands(bot):
         
         try:
             await stream_manager.update_title(title)
-            await ctx.send(f"🕯️ The stream’s fate has been rewritten: {title}")
+            await ctx.send(f"🕯️ El destino del ritual ha sido reescrito: {title}")
         except TwitchAPIError as e:
             await ctx.send(f"❌ Error: {e.message}")
     
@@ -56,7 +53,6 @@ def setup_stream_commands(bot):
         
         game_name = parts[1].strip()
         
-        # Validar nombre
         is_valid, error_msg = validate_game_name(game_name)
         if not is_valid:
             await ctx.send(f"❌ {error_msg}")
@@ -64,9 +60,9 @@ def setup_stream_commands(bot):
         
         try:
             game_id, actual_name = await stream_manager.update_game(game_name)
-            await ctx.send(f"⚔️ The descent continues into: {actual_name}")
+            await ctx.send(f"⚔️ El descenso continúa hacia: {actual_name}")
         except ResourceNotFoundError:
-            await ctx.send("❌ No echo responds from the void (category not found).")
+            await ctx.send("❌ El vacío no responde... categoría no encontrada.")
         except TwitchAPIError as e:
             await ctx.send(f"❌ Error: {e.message}")
     
@@ -78,6 +74,6 @@ def setup_stream_commands(bot):
         
         try:
             marker_id = await stream_manager.create_marker()
-            await ctx.send("🔥 A fragment of time has been sealed in silence.")
+            await ctx.send("🔮 Un fragmento de tiempo ha sido sellado en el silencio.")
         except TwitchAPIError as e:
             await ctx.send(f"❌ Error: {e.message}")

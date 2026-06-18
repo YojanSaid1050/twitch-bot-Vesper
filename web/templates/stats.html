@@ -1,0 +1,355 @@
+{% extends "base.html" %}
+
+{% block title %}VesperBot - Estadísticas{% endblock %}
+{% block header %}Estadísticas del Stream{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <div class="card full-width">
+        <div class="card-header">
+            <i class="fas fa-chart-line"></i>
+            <h3>Evolución del Canal</h3>
+            <div style="display: flex; gap: 12px; margin-left: auto; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary);">
+                    <input type="checkbox" id="toggle-followers" checked>
+                    <span style="color: #8b5cf6;">●</span> Seguidores
+                </label>
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary);">
+                    <input type="checkbox" id="toggle-subscribers" checked>
+                    <span style="color: #22c55e;">●</span> Suscriptores
+                </label>
+                <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary);">
+                    <input type="checkbox" id="toggle-cheers" checked>
+                    <span style="color: #f59e0b;">●</span> Bits/Cheers
+                </label>
+                <button onclick="refreshStats()" class="btn-icon btn-sm" title="Refrescar">
+                    <i class="fas fa-sync"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div style="position: relative; height: 350px;">
+                <canvas id="statsChart"></canvas>
+            </div>
+            <div style="display: flex; gap: 20px; justify-content: center; margin-top: 12px; flex-wrap: wrap; font-size: 13px; color: var(--text-secondary);">
+                <span>📊 <span id="stats-period">Últimos 7 registros</span></span>
+                <span>👥 <span id="stats-total-followers">0</span> seguidores</span>
+                <span>💎 <span id="stats-total-subs">0</span> suscriptores</span>
+                <span>💜 <span id="stats-total-cheers">0</span> bits</span>
+                <span>🔄 <span id="stats-last-update">-</span></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-headset"></i>
+            <h3>Estado del Stream</h3>
+        </div>
+        <div class="card-body">
+            <div id="stream-stats">
+                <div class="stat-item" style="margin-bottom: 12px;">
+                    <span class="stat-icon">📺</span>
+                    <div>
+                        <span class="stat-value" id="stat-viewers">0</span>
+                        <span class="stat-label">Espectadores actuales</span>
+                    </div>
+                </div>
+                <div class="stat-item" style="margin-bottom: 12px;">
+                    <span class="stat-icon">🎮</span>
+                    <div>
+                        <span class="stat-value" id="stat-game" style="font-size: 16px;">-</span>
+                        <span class="stat-label">Juego</span>
+                    </div>
+                </div>
+                <div class="stat-item" style="margin-bottom: 12px;">
+                    <span class="stat-icon">📝</span>
+                    <div>
+                        <span class="stat-value" id="stat-title" style="font-size: 14px;">-</span>
+                        <span class="stat-label">Título</span>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">⏱️</span>
+                    <div>
+                        <span class="stat-value" id="stat-uptime">Offline</span>
+                        <span class="stat-label">Tiempo en vivo</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-crown"></i>
+            <h3>Estadísticas del Canal</h3>
+        </div>
+        <div class="card-body">
+            <div class="stats-grid" style="grid-template-columns: 1fr 1fr;">
+                <div class="stat-item">
+                    <span class="stat-icon">👥</span>
+                    <div>
+                        <span class="stat-value" id="stat-followers">0</span>
+                        <span class="stat-label">Seguidores</span>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">💎</span>
+                    <div>
+                        <span class="stat-value" id="stat-subscribers">0</span>
+                        <span class="stat-label">Suscriptores</span>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">💜</span>
+                    <div>
+                        <span class="stat-value" id="stat-cheers">0</span>
+                        <span class="stat-label">Bits totales</span>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">📝</span>
+                    <div>
+                        <span class="stat-value" id="stat-commands">0</span>
+                        <span class="stat-label">Comandos</span>
+                    </div>
+                </div>
+                <div class="stat-item" style="grid-column: span 2; background: var(--bg-hover);">
+                    <span class="stat-icon">👤</span>
+                    <div>
+                        <span class="stat-value" id="stat-last-follower" style="font-size: 16px;">Esperando...</span>
+                        <span class="stat-label">Último seguidor</span>
+                    </div>
+                </div>
+                <div class="stat-item" style="grid-column: span 2; background: var(--bg-hover);">
+                    <span class="stat-icon">👑</span>
+                    <div>
+                        <span class="stat-value" id="stat-last-subscriber" style="font-size: 16px;">Esperando...</span>
+                        <span class="stat-label">Último suscriptor</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let statsChart = null;
+let statsInterval = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Inicializar gráfico
+    const ctx = document.getElementById('statsChart').getContext('2d');
+    statsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                {
+                    label: 'Seguidores',
+                    data: [],
+                    borderColor: '#8b5cf6',
+                    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 3,
+                    pointBackgroundColor: '#8b5cf6'
+                },
+                {
+                    label: 'Suscriptores',
+                    data: [],
+                    borderColor: '#22c55e',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 3,
+                    pointBackgroundColor: '#22c55e'
+                },
+                {
+                    label: 'Bits/Cheers',
+                    data: [],
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 3,
+                    pointBackgroundColor: '#f59e0b',
+                    borderDash: [5, 5]
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    labels: {
+                        color: '#e4e4e7',
+                        font: { size: 12 },
+                        usePointStyle: true,
+                        pointStyle: 'circle'
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(26, 26, 46, 0.9)',
+                    titleColor: '#e4e4e7',
+                    bodyColor: '#a1a1aa',
+                    borderColor: 'rgba(42, 42, 74, 0.5)',
+                    borderWidth: 1,
+                    padding: 12,
+                    cornerRadius: 8
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#71717a', font: { size: 10 } },
+                    grid: { color: 'rgba(113, 113, 122, 0.1)' }
+                },
+                y: {
+                    ticks: { color: '#71717a', font: { size: 10 } },
+                    grid: { color: 'rgba(113, 113, 122, 0.1)' },
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+
+    // Toggle de datasets
+    document.getElementById('toggle-followers').addEventListener('change', function() {
+        statsChart.data.datasets[0].hidden = !this.checked;
+        statsChart.update();
+    });
+    document.getElementById('toggle-subscribers').addEventListener('change', function() {
+        statsChart.data.datasets[1].hidden = !this.checked;
+        statsChart.update();
+    });
+    document.getElementById('toggle-cheers').addEventListener('change', function() {
+        statsChart.data.datasets[2].hidden = !this.checked;
+        statsChart.update();
+    });
+
+    // Cargar estadísticas
+    loadStats();
+    statsInterval = setInterval(loadStats, 30000);
+});
+
+function refreshStats() {
+    if (window.dashboardAPI && typeof window.dashboardAPI.refresh === 'function') {
+        window.dashboardAPI.refresh().then(() => {
+            loadStats();
+            showToast('🔄 Estadísticas actualizadas', 'info');
+        }).catch(() => {
+            loadStats();
+            showToast('🔄 Estadísticas actualizadas (fallback)', 'info');
+        });
+    } else {
+        loadStatsFallback();
+        showToast('🔄 Estadísticas actualizadas', 'info');
+    }
+}
+
+function loadStats() {
+    if (window.dashboardAPI && typeof window.dashboardAPI.getData === 'function') {
+        window.dashboardAPI.getData().then(data => {
+            updateStatsFromData(data);
+        }).catch(() => {
+            loadStatsFallback();
+        });
+    } else {
+        loadStatsFallback();
+    }
+}
+
+function loadStatsFallback() {
+    fetch('/api/status')
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById('stat-viewers').textContent = data.viewers || 0;
+            document.getElementById('stat-game').textContent = data.game || 'No especificado';
+            document.getElementById('stat-title').textContent = data.title || 'Sin título';
+            document.getElementById('stat-uptime').textContent = data.live ? '🟢 En vivo' : '🔴 Offline';
+            document.getElementById('stat-followers').textContent = data.followers || 0;
+            document.getElementById('stat-subscribers').textContent = data.subscribers || 0;
+            document.getElementById('stat-commands').textContent = data.commands || 0;
+            document.getElementById('stat-last-follower').textContent = 'Esperando...';
+            document.getElementById('stat-last-subscriber').textContent = 'Esperando...';
+            document.getElementById('stats-total-followers').textContent = data.followers || 0;
+            document.getElementById('stats-total-subs').textContent = data.subscribers || 0;
+            document.getElementById('stats-last-update').textContent = new Date().toLocaleTimeString();
+            
+            // Sin historial, mostrar solo el valor actual
+            updateChartWithHistory([]);
+        })
+        .catch(() => {});
+}
+
+function updateStatsFromData(data) {
+    document.getElementById('stat-viewers').textContent = data.status?.viewers || 0;
+    document.getElementById('stat-game').textContent = data.status?.game || 'No especificado';
+    document.getElementById('stat-title').textContent = data.status?.title || 'Sin título';
+    document.getElementById('stat-uptime').textContent = data.status?.live ? '🟢 En vivo' : '🔴 Offline';
+    
+    document.getElementById('stat-followers').textContent = data.stats?.followers || 0;
+    document.getElementById('stat-subscribers').textContent = data.stats?.subscribers || 0;
+    document.getElementById('stat-cheers').textContent = data.stats?.cheers || 0;
+    document.getElementById('stat-commands').textContent = data.stats?.commands || 0;
+    
+    document.getElementById('stat-last-follower').textContent = data.last_follower || 'Esperando...';
+    document.getElementById('stat-last-subscriber').textContent = data.last_subscriber || 'Esperando...';
+    
+    document.getElementById('stats-total-followers').textContent = data.stats?.followers || 0;
+    document.getElementById('stats-total-subs').textContent = data.stats?.subscribers || 0;
+    document.getElementById('stats-total-cheers').textContent = data.stats?.cheers || 0;
+    document.getElementById('stats-last-update').textContent = new Date().toLocaleTimeString();
+    document.getElementById('stats-period').textContent = `Últimos ${data.stats_history?.length || 0} registros`;
+    
+    // Actualizar gráfica con historial REAL
+    updateChartWithHistory(data.stats_history || []);
+}
+
+function updateChartWithHistory(history) {
+    if (!statsChart) return;
+    
+    // Si no hay historial, usar valores actuales
+    if (!history || history.length === 0) {
+        const followers = parseInt(document.getElementById('stat-followers').textContent) || 0;
+        const subscribers = parseInt(document.getElementById('stat-subscribers').textContent) || 0;
+        const cheers = parseInt(document.getElementById('stat-cheers').textContent) || 0;
+        
+        statsChart.data.labels = ['Ahora'];
+        statsChart.data.datasets[0].data = [followers];
+        statsChart.data.datasets[1].data = [subscribers];
+        statsChart.data.datasets[2].data = [cheers];
+        statsChart.update();
+        return;
+    }
+    
+    // Extraer datos del historial
+    const labels = history.map(item => {
+        const date = new Date(item.timestamp);
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    });
+    
+    const followerData = history.map(item => item.followers || 0);
+    const subscriberData = history.map(item => item.subscribers || 0);
+    const cheerData = history.map(item => item.cheers || 0);
+    
+    statsChart.data.labels = labels;
+    statsChart.data.datasets[0].data = followerData;
+    statsChart.data.datasets[1].data = subscriberData;
+    statsChart.data.datasets[2].data = cheerData;
+    statsChart.update();
+}
+
+window.addEventListener('beforeunload', function() {
+    if (statsInterval) clearInterval(statsInterval);
+});
+</script>
+{% endblock %}

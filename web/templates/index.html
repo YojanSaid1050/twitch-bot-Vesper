@@ -1,0 +1,666 @@
+{% extends "base.html" %}
+
+{% block title %}VesperBot - Dashboard{% endblock %}
+{% block header %}Panel de Control{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <!-- Estado del Stream (mejorado con edición offline) -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-broadcast"></i>
+            <h3>Estado del Stream</h3>
+            <span id="stream-status-badge" class="badge" style="background: var(--color-danger); margin-left: auto;">Offline</span>
+        </div>
+        <div class="card-body">
+            <div class="status-indicator">
+                <span class="status-dot" id="stream-dot"></span>
+                <span id="stream-status-text">Cargando...</span>
+            </div>
+            
+            <!-- Título del Stream - EDITABLE SIEMPRE -->
+            <div class="stream-edit-section">
+                <div class="info-item" style="align-items: flex-start;">
+                    <span class="label" style="padding-top: 8px;">Título:</span>
+                    <div style="flex: 1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <span class="value" id="stream-title" style="flex: 1; min-width: 150px;">-</span>
+                        <button onclick="editStreamTitle()" class="btn-icon btn-sm" title="Editar título" style="padding: 4px 8px;">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="title-edit-container" style="display: none; margin: 8px 0 8px 88px;">
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <input type="text" id="title-input" class="form-control" style="flex: 1; min-width: 200px;" placeholder="Nuevo título del stream">
+                        <button onclick="saveStreamTitle()" class="btn-primary btn-sm">
+                            <i class="fas fa-check"></i> Guardar
+                        </button>
+                        <button onclick="cancelStreamTitle()" class="btn-secondary btn-sm">
+                            <i class="fas fa-times"></i> Cancelar
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Juego/Categoría - EDITABLE SIEMPRE -->
+            <div class="stream-edit-section">
+                <div class="info-item" style="align-items: flex-start;">
+                    <span class="label" style="padding-top: 8px;">Juego:</span>
+                    <div style="flex: 1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <span class="value" id="stream-game" style="flex: 1; min-width: 150px;">-</span>
+                        <button onclick="editStreamGame()" class="btn-icon btn-sm" title="Cambiar juego" style="padding: 4px 8px;">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                    </div>
+                </div>
+                <div id="game-edit-container" style="display: none; margin: 8px 0 8px 88px;">
+                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                        <input type="text" id="game-input" class="form-control" style="flex: 1; min-width: 200px;" placeholder="Nombre del juego o categoría">
+                        <button onclick="saveStreamGame()" class="btn-primary btn-sm">
+                            <i class="fas fa-check"></i> Guardar
+                        </button>
+                        <button onclick="cancelStreamGame()" class="btn-secondary btn-sm">
+                            <i class="fas fa-times"></i> Cancelar
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-item">
+                <span class="label">Espectadores:</span>
+                <span class="value" id="stream-viewers">0</span>
+            </div>
+            <div class="info-item">
+                <span class="label">Tiempo en vivo:</span>
+                <span class="value" id="stream-uptime">-</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Estadísticas Rápidas -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-chart-simple"></i>
+            <h3>Estadísticas</h3>
+            <a href="/stats" class="btn-icon btn-sm" style="margin-left: auto; padding: 2px 8px; font-size: 12px;" title="Ver estadísticas completas">
+                <i class="fas fa-arrow-right"></i>
+            </a>
+        </div>
+        <div class="card-body stats-grid" style="grid-template-columns: 1fr 1fr;">
+            <div class="stat-item">
+                <span class="stat-icon">👥</span>
+                <div>
+                    <span class="stat-value" id="stat-followers">0</span>
+                    <span class="stat-label">Seguidores</span>
+                </div>
+            </div>
+            <div class="stat-item">
+                <span class="stat-icon">💎</span>
+                <div>
+                    <span class="stat-value" id="stat-subscribers">0</span>
+                    <span class="stat-label">Suscriptores</span>
+                </div>
+            </div>
+            <div class="stat-item">
+                <span class="stat-icon">📝</span>
+                <div>
+                    <span class="stat-value" id="stat-commands">0</span>
+                    <span class="stat-label">Comandos</span>
+                </div>
+            </div>
+            <div class="stat-item">
+                <span class="stat-icon">🚫</span>
+                <div>
+                    <span class="stat-value" id="stat-banned">0</span>
+                    <span class="stat-label">Palabras Bloqueadas</span>
+                </div>
+            </div>
+            <div class="stat-item" style="grid-column: span 2; background: var(--bg-hover);">
+                <span class="stat-icon">👤</span>
+                <div>
+                    <span class="stat-value" id="stat-last-follower" style="font-size: 16px;">Esperando...</span>
+                    <span class="stat-label">Último seguidor</span>
+                </div>
+            </div>
+            <div class="stat-item" style="grid-column: span 2; background: var(--bg-hover);">
+                <span class="stat-icon">👑</span>
+                <div>
+                    <span class="stat-value" id="stat-last-subscriber" style="font-size: 16px;">Esperando...</span>
+                    <span class="stat-label">Último suscriptor</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Fila 2: Moderación y Spotify -->
+<div class="dashboard-grid">
+    <!-- Moderación Rápida -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-shield-alt"></i>
+            <h3>Moderación</h3>
+            <a href="/moderation" class="btn-icon btn-sm" style="margin-left: auto; padding: 2px 8px; font-size: 12px;" title="Ir a moderación">
+                <i class="fas fa-arrow-right"></i>
+            </a>
+        </div>
+        <div class="card-body">
+            <div class="stats-grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
+                <div class="stat-item" style="flex-direction: column; text-align: center; padding: 8px;">
+                    <span class="stat-value" id="mod-timeouts" style="font-size: 28px;">0</span>
+                    <span class="stat-label">⏰ Timeouts</span>
+                </div>
+                <div class="stat-item" style="flex-direction: column; text-align: center; padding: 8px;">
+                    <span class="stat-value" id="mod-banned" style="font-size: 28px;">0</span>
+                    <span class="stat-label">🔨 Baneados</span>
+                </div>
+                <div class="stat-item" style="flex-direction: column; text-align: center; padding: 8px;">
+                    <span class="stat-value" id="mod-warnings" style="font-size: 28px;">0</span>
+                    <span class="stat-label">⚠️ Advertencias</span>
+                </div>
+            </div>
+            <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted); text-align: center;">
+                Última actualización: <span id="mod-last-update">-</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Spotify Rápido (solo visual, sin botones) -->
+    <div class="card">
+        <div class="card-header">
+            <i class="fas fa-music"></i>
+            <h3>Spotify</h3>
+            <a href="/spotify" class="btn-icon btn-sm" style="margin-left: auto; padding: 2px 8px; font-size: 12px;" title="Ir a Spotify">
+                <i class="fas fa-arrow-right"></i>
+            </a>
+        </div>
+        <div class="card-body" id="spotify-preview">
+            <div style="display: flex; align-items: center; gap: 16px; padding: 8px 0;">
+                <!-- Disco giratorio -->
+                <div style="position: relative; flex-shrink: 0;">
+                    <div id="vinyl-container" style="width: 80px; height: 80px; border-radius: 50%; overflow: hidden; border: 2px solid var(--border-color); background: #1a1a2e; display: flex; align-items: center; justify-content: center; position: relative;">
+                        <img id="spotify-album-art" src="" alt="Album art" style="width: 100%; height: 100%; object-fit: cover; display: none;">
+                        <div id="vinyl-placeholder" style="width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #2a2a4a, #0a0a0f); display: flex; align-items: center; justify-content: center; font-size: 32px; color: var(--text-muted);">
+                            <i class="fas fa-music"></i>
+                        </div>
+                        <!-- Centro del disco -->
+                        <div style="position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--color-accent); border: 2px solid var(--bg-primary);"></div>
+                    </div>
+                    <!-- Indicador de reproducción en el disco -->
+                    <div id="vinyl-spinner" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 50%; border: 3px solid transparent; border-top-color: var(--color-accent); opacity: 0; transition: opacity 0.3s; pointer-events: none;"></div>
+                </div>
+                
+                <!-- Información de la canción -->
+                <div style="flex: 1; min-width: 0;">
+                    <div id="spotify-current-track" style="font-size: 16px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-</div>
+                    <div id="spotify-current-artist" style="font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-</div>
+                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                        <span id="spotify-playing-indicator">⏸️ Pausado</span>
+                        <span style="margin-left: 12px;" id="spotify-queue-count">0</span> en cola
+                    </div>
+                </div>
+            </div>
+            <!-- Barra de progreso visual simple -->
+            <div style="margin-top: 8px; height: 3px; background: var(--bg-hover); border-radius: 2px; overflow: hidden;">
+                <div id="spotify-progress-bar" style="height: 100%; width: 0%; background: var(--color-accent); border-radius: 2px; transition: width 0.5s;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.stream-edit-section {
+    margin: 4px 0;
+}
+
+.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.btn-secondary:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.btn-icon.btn-sm {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+#title-edit-container input,
+#game-edit-container input {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    padding: 6px 12px;
+    font-size: 14px;
+}
+
+#title-edit-container input:focus,
+#game-edit-container input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+}
+
+/* Animación de giro del disco */
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.vinyl-spinning #vinyl-container {
+    animation: spin 2s linear infinite;
+}
+
+.vinyl-spinning #vinyl-spinner {
+    opacity: 1;
+    animation: spin 1.5s linear infinite;
+}
+
+#vinyl-container {
+    transition: transform 0.3s ease;
+}
+
+@media (max-width: 768px) {
+    .stream-edit-section .info-item {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .stream-edit-section .info-item .label {
+        padding-top: 4px;
+    }
+    
+    #title-edit-container,
+    #game-edit-container {
+        margin-left: 0 !important;
+    }
+    
+    #title-edit-container > div,
+    #game-edit-container > div {
+        flex-direction: column;
+        width: 100%;
+    }
+    
+    #title-edit-container input,
+    #game-edit-container input {
+        width: 100%;
+    }
+    
+    #spotify-preview > div {
+        flex-direction: column;
+        text-align: center;
+    }
+    
+    #vinyl-container {
+        width: 60px !important;
+        height: 60px !important;
+    }
+}
+</style>
+
+<script>
+// ============================================
+// ESTADO PARA EDICIÓN
+// ============================================
+
+let currentTitle = '';
+let currentGame = '';
+let currentLive = false;
+let isEditingTitle = false;
+let isEditingGame = false;
+let spotifyPlaying = false;
+let spotifyProgress = 0;
+let spotifyDuration = 0;
+let progressInterval = null;
+
+// ============================================
+// FUNCIONES DE EDICIÓN DE TÍTULO (siempre permitidas)
+// ============================================
+
+function editStreamTitle() {
+    isEditingTitle = true;
+    document.getElementById('title-edit-container').style.display = 'block';
+    document.getElementById('title-input').value = currentTitle;
+    document.getElementById('title-input').focus();
+    document.getElementById('title-input').select();
+}
+
+function cancelStreamTitle() {
+    isEditingTitle = false;
+    document.getElementById('title-edit-container').style.display = 'none';
+    document.getElementById('title-input').value = '';
+}
+
+async function saveStreamTitle() {
+    const newTitle = document.getElementById('title-input').value.trim();
+    if (!newTitle) {
+        showToast('❌ El título no puede estar vacío', 'error');
+        return;
+    }
+    
+    if (newTitle === currentTitle) {
+        cancelStreamTitle();
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/stream/title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle })
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('✅ Título actualizado correctamente', 'success');
+            currentTitle = newTitle;
+            document.getElementById('stream-title').textContent = newTitle;
+            cancelStreamTitle();
+            dashboardAPI.refresh();
+        } else {
+            showToast('❌ Error: ' + (data.error || 'No se pudo actualizar'), 'error');
+        }
+    } catch (error) {
+        showToast('❌ Error al actualizar título', 'error');
+    }
+}
+
+// ============================================
+// FUNCIONES DE EDICIÓN DE JUEGO (siempre permitidas)
+// ============================================
+
+function editStreamGame() {
+    isEditingGame = true;
+    document.getElementById('game-edit-container').style.display = 'block';
+    document.getElementById('game-input').value = currentGame;
+    document.getElementById('game-input').focus();
+    document.getElementById('game-input').select();
+}
+
+function cancelStreamGame() {
+    isEditingGame = false;
+    document.getElementById('game-edit-container').style.display = 'none';
+    document.getElementById('game-input').value = '';
+}
+
+async function saveStreamGame() {
+    const newGame = document.getElementById('game-input').value.trim();
+    if (!newGame) {
+        showToast('❌ El nombre del juego no puede estar vacío', 'error');
+        return;
+    }
+    
+    if (newGame === currentGame) {
+        cancelStreamGame();
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/stream/game', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ game: newGame })
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            showToast('✅ Juego actualizado correctamente', 'success');
+            currentGame = data.game_name || newGame;
+            document.getElementById('stream-game').textContent = currentGame;
+            cancelStreamGame();
+            dashboardAPI.refresh();
+        } else {
+            showToast('❌ Error: ' + (data.error || 'No se pudo actualizar'), 'error');
+        }
+    } catch (error) {
+        showToast('❌ Error al actualizar juego', 'error');
+    }
+}
+
+// ============================================
+// ACTUALIZAR DISCO DE SPOTIFY
+// ============================================
+
+function updateSpotifyDisc(track, isPlaying, progressMs, durationMs) {
+    const container = document.getElementById('vinyl-container');
+    const albumArt = document.getElementById('spotify-album-art');
+    const placeholder = document.getElementById('vinyl-placeholder');
+    const spinner = document.getElementById('vinyl-spinner');
+    
+    // Actualizar información
+    document.getElementById('spotify-current-track').textContent = track?.name || '-';
+    document.getElementById('spotify-current-artist').textContent = track?.artist || '-';
+    
+    const indicator = document.getElementById('spotify-playing-indicator');
+    const queueCount = document.getElementById('spotify-queue-count');
+    
+    // Actualizar imagen del disco
+    if (track?.album_art) {
+        albumArt.src = track.album_art;
+        albumArt.style.display = 'block';
+        placeholder.style.display = 'none';
+    } else {
+        albumArt.style.display = 'none';
+        placeholder.style.display = 'flex';
+    }
+    
+    // Estado de reproducción y animación
+    if (isPlaying) {
+        indicator.textContent = '▶️ Reproduciendo';
+        container.parentElement.classList.add('vinyl-spinning');
+        spinner.style.opacity = '1';
+        spotifyPlaying = true;
+    } else {
+        indicator.textContent = '⏸️ Pausado';
+        container.parentElement.classList.remove('vinyl-spinning');
+        spinner.style.opacity = '0';
+        spotifyPlaying = false;
+    }
+    
+    // Progreso
+    if (durationMs > 0) {
+        spotifyDuration = durationMs;
+        spotifyProgress = progressMs || 0;
+        updateProgressBar();
+        
+        // Actualizar barra de progreso cada segundo
+        if (progressInterval) clearInterval(progressInterval);
+        if (isPlaying) {
+            progressInterval = setInterval(() => {
+                spotifyProgress += 1000;
+                if (spotifyProgress > spotifyDuration) {
+                    spotifyProgress = 0;
+                }
+                updateProgressBar();
+            }, 1000);
+        }
+    }
+}
+
+function updateProgressBar() {
+    const percent = spotifyDuration > 0 ? (spotifyProgress / spotifyDuration) * 100 : 0;
+    document.getElementById('spotify-progress-bar').style.width = Math.min(percent, 100) + '%';
+}
+
+// ============================================
+// ACTUALIZAR DASHBOARD DESDE DATOS
+// ============================================
+
+function updateDashboardFromData(data) {
+    // Estado del stream
+    currentLive = data.status?.live || false;
+    currentTitle = data.status?.title || 'Sin título';
+    currentGame = data.status?.game || 'No especificado';
+    
+    const dot = document.getElementById('stream-dot');
+    const statusText = document.getElementById('stream-status-text');
+    const statusBadge = document.getElementById('stream-status-badge');
+    
+    if (currentLive) {
+        dot.className = 'status-dot online';
+        statusText.textContent = '🟢 En Vivo';
+        statusBadge.textContent = '🟢 EN VIVO';
+        statusBadge.style.background = 'var(--color-success)';
+    } else {
+        dot.className = 'status-dot offline';
+        statusText.textContent = '🔴 Desconectado';
+        statusBadge.textContent = '🔴 Offline';
+        statusBadge.style.background = 'var(--color-danger)';
+    }
+    
+    document.getElementById('stream-title').textContent = currentTitle;
+    document.getElementById('stream-game').textContent = currentGame;
+    document.getElementById('stream-viewers').textContent = data.status?.viewers || 0;
+    document.getElementById('stream-uptime').textContent = data.status?.uptime || '-';
+    
+    // Estadísticas
+    document.getElementById('stat-followers').textContent = data.stats?.followers || 0;
+    document.getElementById('stat-subscribers').textContent = data.stats?.subscribers || 0;
+    document.getElementById('stat-commands').textContent = data.stats?.commands || 0;
+    document.getElementById('stat-banned').textContent = data.stats?.banned_words || 0;
+    
+    // Último seguidor y suscriptor
+    document.getElementById('stat-last-follower').textContent = data.last_follower || 'Esperando...';
+    document.getElementById('stat-last-subscriber').textContent = data.last_subscriber || 'Esperando...';
+    
+    // Moderación
+    const timeouts = data.moderation?.timeouts?.length || 0;
+    const botTimeouts = data.moderation?.bot_timeouts?.length || 0;
+    const banned = data.moderation?.banned?.length || 0;
+    const botBanned = data.moderation?.bot_banned?.length || 0;
+    const warnings = data.moderation?.link_warnings?.length || 0;
+    
+    document.getElementById('mod-timeouts').textContent = timeouts + botTimeouts;
+    document.getElementById('mod-banned').textContent = banned + botBanned;
+    document.getElementById('mod-warnings').textContent = warnings;
+    document.getElementById('mod-last-update').textContent = new Date().toLocaleTimeString();
+    
+    // Spotify (con imagen de portada)
+    const spotify = data.spotify || {};
+    const currentTrack = spotify.current || {};
+    const queue = spotify.queue || [];
+    
+    // Obtener portada del álbum
+    let albumArt = null;
+    if (currentTrack.url) {
+        // Intentar obtener portada desde Spotify
+        try {
+            const trackId = currentTrack.id;
+            if (trackId) {
+                // Usar la API de Spotify para obtener la portada (en el backend)
+                fetch(`/api/spotify/track-art/${trackId}`)
+                    .then(res => res.json())
+                    .then(artData => {
+                        if (artData.album_art) {
+                            updateSpotifyDisc(
+                                { ...currentTrack, album_art: artData.album_art },
+                                spotify.is_playing || false,
+                                spotify.progress_ms || 0,
+                                currentTrack.duration_ms || 0
+                            );
+                        }
+                    })
+                    .catch(() => {});
+            }
+        } catch (e) {}
+    }
+    
+    document.getElementById('spotify-queue-count').textContent = queue.length;
+    
+    // Si no se pudo obtener portada, mostrar sin ella
+    if (!albumArt) {
+        updateSpotifyDisc(
+            currentTrack,
+            spotify.is_playing || false,
+            spotify.progress_ms || 0,
+            currentTrack.duration_ms || 0
+        );
+    }
+}
+
+// ============================================
+// FALLBACK PARA DASHBOARD
+// ============================================
+
+function updateDashboardFallback() {
+    fetch('/api/status')
+        .then(res => res.json())
+        .then(data => {
+            currentLive = data.live || false;
+            currentTitle = data.title || 'Sin título';
+            currentGame = data.game || 'No especificado';
+            
+            document.getElementById('stream-title').textContent = currentTitle;
+            document.getElementById('stream-game').textContent = currentGame;
+            document.getElementById('stream-viewers').textContent = data.viewers || 0;
+            document.getElementById('stream-uptime').textContent = data.uptime || '-';
+            document.getElementById('stat-followers').textContent = data.followers || 0;
+            document.getElementById('stat-subscribers').textContent = data.subscribers || 0;
+            document.getElementById('stat-commands').textContent = data.commands || 0;
+            document.getElementById('stat-banned').textContent = data.banned_words || 0;
+            
+            // Último seguidor y suscriptor (fallback)
+            document.getElementById('stat-last-follower').textContent = 'Esperando...';
+            document.getElementById('stat-last-subscriber').textContent = 'Esperando...';
+        })
+        .catch(() => {});
+}
+
+// ============================================
+// FUNCIÓN PRINCIPAL DE ACTUALIZACIÓN
+// ============================================
+
+function updateDashboard() {
+    if (window.dashboardAPI && typeof window.dashboardAPI.getData === 'function') {
+        window.dashboardAPI.getData().then(data => {
+            updateDashboardFromData(data);
+        }).catch(() => {
+            updateDashboardFallback();
+        });
+    } else {
+        updateDashboardFallback();
+    }
+}
+
+// ============================================
+// INICIALIZACIÓN
+// ============================================
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateDashboard();
+    
+    // Suscribirse a actualizaciones de la API
+    if (window.dashboardAPI && typeof window.dashboardAPI.subscribe === 'function') {
+        window.dashboardAPI.subscribe(updateDashboardFromData);
+    }
+    
+    // Tecla ESC para cancelar edición
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            if (isEditingTitle) cancelStreamTitle();
+            if (isEditingGame) cancelStreamGame();
+        }
+    });
+    
+    // Limpiar intervalo al salir
+    window.addEventListener('beforeunload', function() {
+        if (progressInterval) clearInterval(progressInterval);
+    });
+});
+
+console.log('📊 Dashboard mejorado cargado correctamente');
+</script>
+{% endblock %}

@@ -8,9 +8,11 @@ from typing import Optional, Dict, Set, List
 from collections import deque
 import threading
 import time
+import requests.exceptions
 
 from config import settings
 from utils.logger import get_logger
+from services.log_service import log_service
 
 logger = get_logger(__name__)
 
@@ -30,12 +32,15 @@ class SpotifyService:
         self.queue_history: deque = deque(maxlen=10)
         self.current_track_id = None
         self._monitoring = False
+        self._last_error_time = 0
+        self._error_cooldown = 30  # No repetir el mismo error más de cada 30 segundos
         
         if self.client_id and self.client_secret:
             self._authenticate()
             self._start_monitoring()
         else:
             logger.warning("⚠️ Spotify no configurado. Los comandos !sr no funcionarán.")
+            log_service.add_log('warning', 'Spotify no configurado (faltan credenciales)', 'spotify_service')
     
     def _authenticate(self):
         """Autenticar con Spotify"""
@@ -48,8 +53,10 @@ class SpotifyService:
                 cache_path=".spotify_cache"
             ))
             logger.info("✅ Autenticado con Spotify")
+            log_service.add_log('info', 'Autenticado con Spotify', 'spotify_service')
         except Exception as e:
             logger.error(f"❌ Error autenticando con Spotify: {e}")
+            log_service.add_log('error', f'Error autenticando con Spotify: {e}', 'spotify_service')
             self.sp = None
     
     def _start_monitoring(self):
@@ -60,17 +67,34 @@ class SpotifyService:
         self._monitoring = True
         
         def monitor():
+            consecutive_errors = 0
             while self._monitoring:
                 try:
                     self._check_current_track()
+                    consecutive_errors = 0
                     time.sleep(2)
+                except (requests.exceptions.ConnectionError, 
+                        requests.exceptions.Timeout,
+                        ConnectionError) as e:
+                    consecutive_errors += 1
+                    now = time.time()
+                    if now - self._last_error_time > self._error_cooldown:
+                        logger.warning(f"⚠️ Spotify no responde (posiblemente cerrado): {e}")
+                        log_service.add_log('warning', f'Spotify no responde: {e}', 'spotify_service')
+                        self._last_error_time = now
+                    if consecutive_errors > 5:
+                        time.sleep(10)
+                    else:
+                        time.sleep(5)
                 except Exception as e:
-                    logger.error(f"Error en monitoreo: {e}")
+                    logger.error(f"Error en monitoreo de Spotify: {e}")
+                    log_service.add_log('error', f'Error en monitoreo de Spotify: {e}', 'spotify_service')
                     time.sleep(5)
         
         thread = threading.Thread(target=monitor, daemon=True)
         thread.start()
         logger.info("🔍 Monitoreo de Spotify iniciado")
+        log_service.add_log('info', 'Monitoreo de Spotify iniciado', 'spotify_service')
     
     def _check_current_track(self):
         """Verificar si la canción actual cambió"""
@@ -101,11 +125,37 @@ class SpotifyService:
                     if track_id in self.queue_info:
                         del self.queue_info[track_id]
                     
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            raise
         except Exception as e:
             logger.error(f"Error en monitoreo: {e}")
+            log_service.add_log('error', f'Error en monitoreo de Spotify: {e}', 'spotify_service')
+    
+    def _safe_api_call(self, func, *args, **kwargs):
+        """Ejecuta una llamada a la API de Spotify con manejo de errores de conexión"""
+        if not self.sp:
+            return None
+        
+        try:
+            return func(*args, **kwargs)
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            now = time.time()
+            if now - self._last_error_time > self._error_cooldown:
+                logger.warning(f"⚠️ Spotify no disponible: {e}")
+                log_service.add_log('warning', f'Spotify no disponible: {e}', 'spotify_service')
+                self._last_error_time = now
+            return None
+        except Exception as e:
+            logger.error(f"Error en API de Spotify: {e}")
+            log_service.add_log('error', f'Error en API de Spotify: {e}', 'spotify_service')
+            return None
     
     def search_track(self, query: str) -> Optional[Dict]:
-        """Buscar una canción en Spotify"""
+        """Buscar una canción en Spotify con portada"""
         if not self.sp:
             return None
         
@@ -117,15 +167,27 @@ class SpotifyService:
                 return None
             
             track = tracks[0]
+            album_art = ''
+            if track.get('album', {}).get('images'):
+                album_art = track['album']['images'][0]['url'] if track['album']['images'] else ''
+            
             return {
                 'id': track['id'],
                 'name': track['name'],
                 'artist': track['artists'][0]['name'],
                 'url': track['external_urls']['spotify'],
-                'duration_ms': track['duration_ms']
+                'duration_ms': track['duration_ms'],
+                'album_art': album_art
             }
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            logger.warning(f"⚠️ Spotify no disponible para búsqueda: {e}")
+            log_service.add_log('warning', f'Spotify no disponible para búsqueda', 'spotify_service')
+            return None
         except Exception as e:
             logger.error(f"Error buscando canción: {e}")
+            log_service.add_log('error', f'Error buscando canción "{query}": {e}', 'spotify_service')
             return None
     
     def is_track_in_queue(self, track_id: str) -> bool:
@@ -133,7 +195,7 @@ class SpotifyService:
         return track_id in self.queue_tracks
     
     def get_queue_list(self) -> List[Dict]:
-        """Obtener lista de canciones en cola con su info"""
+        """Obtener lista de canciones en cola con su info y portada"""
         queue_list = []
         for i, track_id in enumerate(self.queue_tracks, 1):
             info = self.queue_info.get(track_id, {})
@@ -141,7 +203,8 @@ class SpotifyService:
                 'position': i,
                 'name': info.get('name', 'Desconocida'),
                 'artist': info.get('artist', 'Desconocido'),
-                'id': track_id
+                'id': track_id,
+                'album_art': info.get('album_art', '')
             })
         return queue_list
     
@@ -149,35 +212,26 @@ class SpotifyService:
         """Obtener número de canciones en cola"""
         return len(self.queue_tracks)
     
-    def remove_from_queue_by_position(self, position: int) -> Optional[str]:
-        """Eliminar canción de la cola por posición"""
-        if 1 <= position <= len(self.queue_tracks):
-            track_id = self.queue_tracks[position - 1]
-            self.queue_tracks.pop(position - 1)
-            if track_id in self.queue_info:
-                info = self.queue_info.pop(track_id)
-                return f"{info.get('name', 'Canción')} - {info.get('artist', 'Desconocido')}"
-        return None
-    
-    def clear_queue(self) -> int:
-        """Limpiar toda la cola"""
-        count = len(self.queue_tracks)
-        self.queue_tracks.clear()
-        self.queue_info.clear()
-        return count
-    
     def set_volume(self, volume: int) -> bool:
         """Ajustar volumen (0-100)"""
         if not self.sp:
             return False
         
         try:
-            volume = max(0, min(100, volume))  # Limitar entre 0 y 100
+            volume = max(0, min(100, volume))
             self.sp.volume(volume)
             logger.info(f"Volumen ajustado a {volume}%")
+            log_service.add_log('info', f'Volumen ajustado a {volume}%', 'spotify_service')
             return True
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            logger.warning(f"⚠️ Spotify no disponible para ajustar volumen: {e}")
+            log_service.add_log('warning', f'Spotify no disponible para ajustar volumen', 'spotify_service')
+            return False
         except Exception as e:
             logger.error(f"Error ajustando volumen: {e}")
+            log_service.add_log('error', f'Error ajustando volumen: {e}', 'spotify_service')
             return False
     
     def get_volume(self) -> Optional[int]:
@@ -190,8 +244,15 @@ class SpotifyService:
             if playback and playback.get('device'):
                 return playback['device'].get('volume_percent', 50)
             return None
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            logger.warning(f"⚠️ Spotify no disponible para obtener volumen: {e}")
+            log_service.add_log('warning', f'Spotify no disponible para obtener volumen', 'spotify_service')
+            return None
         except Exception as e:
             logger.error(f"Error obteniendo volumen: {e}")
+            log_service.add_log('error', f'Error obteniendo volumen: {e}', 'spotify_service')
             return None
     
     def get_track_position_in_history(self, track_id: str) -> int:
@@ -212,48 +273,81 @@ class SpotifyService:
     
     def add_to_queue(self, track_id: str, track_info: dict) -> bool:
         """
-        Añadir canción a la cola de Spotify
+        Añadir canción a la cola de Spotify con portada
         """
         if not self.sp:
             return False
         
         try:
             self.sp.add_to_queue(track_id)
+            
+            # Obtener portada del álbum
+            album_art = track_info.get('album_art', '')
+            if not album_art:
+                try:
+                    track = self.sp.track(track_id)
+                    if track and track.get('album', {}).get('images'):
+                        album_art = track['album']['images'][0]['url'] if track['album']['images'] else ''
+                except:
+                    pass
+            
             self.queue_tracks.append(track_id)
             self.queue_info[track_id] = {
-                'name': track_info['name'],
-                'artist': track_info['artist']
+                'name': track_info.get('name', 'Canción'),
+                'artist': track_info.get('artist', 'Artista'),
+                'album_art': album_art
             }
-            logger.info(f"Canción añadida a la cola: {track_info['name']}")
+            logger.info(f"Canción añadida a la cola: {track_info.get('name')}")
+            log_service.add_log('info', f'Canción añadida a la cola: {track_info.get("name")}', 'spotify_service')
             return True
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            logger.warning(f"⚠️ Spotify no disponible para añadir a cola: {e}")
+            log_service.add_log('warning', f'Spotify no disponible para añadir a cola', 'spotify_service')
+            return False
         except Exception as e:
             logger.error(f"Error añadiendo a la cola: {e}")
+            log_service.add_log('error', f'Error añadiendo a la cola: {e}', 'spotify_service')
             return False
     
     def get_current_track(self) -> Optional[Dict]:
-        """Obtener canción actual"""
+        """
+        Obtener canción actual (incluso si está pausada)
+        Devuelve: {name, artist, url, id, duration_ms, is_playing}
+        """
         if not self.sp:
             return None
         
         try:
             current = self.sp.current_user_playing_track()
-            
-            if not current or not current.get('is_playing'):
+            if not current or not current.get('item'):
                 return None
-            
             item = current.get('item', {})
             return {
                 'name': item.get('name'),
                 'artist': item.get('artists', [{}])[0].get('name'),
                 'url': item.get('external_urls', {}).get('spotify'),
-                'id': item.get('id')
+                'id': item.get('id'),
+                'duration_ms': item.get('duration_ms'),
+                'is_playing': current.get('is_playing', False)
             }
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            now = time.time()
+            if now - self._last_error_time > self._error_cooldown:
+                logger.warning(f"⚠️ Spotify no disponible para obtener canción actual: {e}")
+                log_service.add_log('warning', f'Spotify no disponible (posiblemente cerrado)', 'spotify_service')
+                self._last_error_time = now
+            return None
         except Exception as e:
             logger.error(f"Error obteniendo canción actual: {e}")
+            log_service.add_log('error', f'Error obteniendo canción actual: {e}', 'spotify_service')
             return None
     
     def skip_track(self) -> bool:
-        """Saltar canción"""
+        """Saltar a la siguiente canción"""
         if not self.sp:
             return False
         
@@ -266,50 +360,164 @@ class SpotifyService:
             
             self.sp.next_track()
             self.current_track_id = None
+            logger.info("⏭️ Saltando a siguiente canción")
+            log_service.add_log('info', 'Saltando a siguiente canción', 'spotify_service')
             return True
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            logger.warning(f"⚠️ Spotify no disponible para saltar: {e}")
+            log_service.add_log('warning', f'Spotify no disponible para saltar', 'spotify_service')
+            return False
         except Exception as e:
             logger.error(f"Error saltando: {e}")
+            log_service.add_log('error', f'Error saltando canción: {e}', 'spotify_service')
+            return False
+    
+    def previous_track(self) -> bool:
+        """Ir a la canción anterior"""
+        if not self.sp:
+            return False
+        
+        try:
+            self.sp.previous_track()
+            self.current_track_id = None
+            logger.info("⏮️ Volviendo a canción anterior")
+            log_service.add_log('info', 'Volviendo a canción anterior', 'spotify_service')
+            return True
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            logger.warning(f"⚠️ Spotify no disponible para ir a anterior: {e}")
+            log_service.add_log('warning', f'Spotify no disponible para ir a anterior', 'spotify_service')
+            return False
+        except Exception as e:
+            logger.error(f"Error yendo a canción anterior: {e}")
+            log_service.add_log('error', f'Error yendo a canción anterior: {e}', 'spotify_service')
             return False
     
     def pause_playback(self) -> bool:
-        """Pausar"""
+        """Pausar reproducción"""
         if not self.sp:
             return False
         
         try:
             self.sp.pause_playback()
+            logger.info("⏸️ Reproducción pausada")
+            log_service.add_log('info', 'Reproducción pausada', 'spotify_service')
             return True
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            logger.warning(f"⚠️ Spotify no disponible para pausar: {e}")
+            log_service.add_log('warning', f'Spotify no disponible para pausar', 'spotify_service')
+            return False
         except Exception as e:
             logger.error(f"Error pausando: {e}")
+            log_service.add_log('error', f'Error pausando reproducción: {e}', 'spotify_service')
             return False
     
     def resume_playback(self) -> bool:
-        """Reanudar"""
+        """Reanudar reproducción"""
         if not self.sp:
             return False
         
         try:
             self.sp.start_playback()
+            logger.info("▶️ Reproducción reanudada")
+            log_service.add_log('info', 'Reproducción reanudada', 'spotify_service')
             return True
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            logger.warning(f"⚠️ Spotify no disponible para reanudar: {e}")
+            log_service.add_log('warning', f'Spotify no disponible para reanudar', 'spotify_service')
+            return False
         except Exception as e:
             logger.error(f"Error reanudando: {e}")
+            log_service.add_log('error', f'Error reanudando reproducción: {e}', 'spotify_service')
             return False
     
     def is_playing(self) -> bool:
-        """Verificar si hay música sonando"""
+        """Verificar si hay música sonando (activo)"""
         if not self.sp:
             return False
         
         try:
             current = self.sp.current_user_playing_track()
             return current is not None and current.get('is_playing', False)
-        except Exception as e:
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            return False
+        except Exception:
             return False
     
     def stop_monitoring(self):
         """Detener monitoreo"""
         self._monitoring = False
-
+        logger.info("🛑 Monitoreo de Spotify detenido")
+        log_service.add_log('info', 'Monitoreo de Spotify detenido', 'spotify_service')
+    
+    def get_playback_state(self) -> Dict:
+        """
+        Obtener estado completo de reproducción con progreso y duración
+        Incluso si está pausado, devuelve la canción actual.
+        """
+        if not self.sp:
+            return {'is_playing': False, 'device': None, 'track': None, 'volume': None}
+        
+        try:
+            playback = self.sp.current_playback()
+            if not playback:
+                return {'is_playing': False, 'device': None, 'track': None, 'volume': None}
+            
+            track = None
+            if playback.get('item'):
+                item = playback['item']
+                track = {
+                    'name': item.get('name'),
+                    'artist': item.get('artists', [{}])[0].get('name'),
+                    'id': item.get('id'),
+                    'url': item.get('external_urls', {}).get('spotify'),
+                    'duration_ms': item.get('duration_ms'),
+                    'progress_ms': playback.get('progress_ms', 0)
+                }
+            
+            return {
+                'is_playing': playback.get('is_playing', False),
+                'device': playback.get('device', {}),
+                'track': track,
+                'volume': playback.get('device', {}).get('volume_percent', 50) if playback.get('device') else None
+            }
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            return {'is_playing': False, 'device': None, 'track': None, 'volume': None}
+        except Exception as e:
+            logger.error(f"Error obteniendo estado de reproducción: {e}")
+            log_service.add_log('error', f'Error obteniendo estado de reproducción: {e}', 'spotify_service')
+            return {'is_playing': False, 'device': None, 'track': None, 'volume': None}
+    
+    def seek(self, position_ms: int) -> bool:
+        """Mover a una posición específica de la canción"""
+        if not self.sp:
+            return False
+        try:
+            self.sp.seek_track(position_ms)
+            logger.info(f"⏩ Seek a {position_ms}ms")
+            log_service.add_log('info', f'Seek a {position_ms}ms', 'spotify_service')
+            return True
+        except (requests.exceptions.ConnectionError, 
+                requests.exceptions.Timeout,
+                ConnectionError) as e:
+            logger.warning(f"⚠️ Spotify no disponible para seek: {e}")
+            log_service.add_log('warning', f'Spotify no disponible para seek', 'spotify_service')
+            return False
+        except Exception as e:
+            logger.error(f"Error en seek: {e}")
+            log_service.add_log('error', f'Error en seek: {e}', 'spotify_service')
+            return False
 
 # Instancia global
 spotify_service = SpotifyService()

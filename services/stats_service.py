@@ -9,6 +9,7 @@ from config import settings
 from services.twitch_api import TwitchAPI
 from exceptions import TwitchAPIError
 from utils.logger import get_logger
+from services.log_service import log_service
 
 logger = get_logger(__name__)
 
@@ -38,7 +39,61 @@ class StatsService:
             return data[0]
         except TwitchAPIError as e:
             logger.error(f"Error obteniendo stream info: {e}")
+            log_service.add_log('error', f'Error obteniendo stream info: {e}', 'stats_service')
             return None
+    
+    async def get_channel_info(self) -> Optional[Dict]:
+        """Obtener información del canal (título, juego, etc)"""
+        try:
+            result = self.api.get(
+                "channels",
+                params={"broadcaster_id": self.broadcaster_id}
+            )
+            
+            data = result.get("data", [])
+            
+            if not data:
+                return None
+            
+            return data[0]
+        except TwitchAPIError as e:
+            logger.error(f"Error obteniendo canal info: {e}")
+            log_service.add_log('error', f'Error obteniendo canal info: {e}', 'stats_service')
+            return None
+    
+    async def get_followers_count(self) -> int:
+        """Obtener número de seguidores"""
+        try:
+            result = self.api.get(
+                "channels/followers",
+                params={"broadcaster_id": self.broadcaster_id}
+            )
+            
+            return result.get("total", 0)
+        except TwitchAPIError as e:
+            if e.status_code in [400, 403, 404]:
+                logger.debug(f"Seguidores no disponibles: {e.status_code}")
+            else:
+                logger.error(f"Error obteniendo seguidores: {e}")
+                log_service.add_log('error', f'Error obteniendo seguidores: {e}', 'stats_service')
+            return 0
+    
+    async def get_subscribers_count(self) -> int:
+        """Obtener número de suscriptores"""
+        try:
+            result = self.api.get(
+                "subscriptions",
+                params={"broadcaster_id": self.broadcaster_id}
+            )
+            
+            return result.get("total", 0)
+        except TwitchAPIError as e:
+            if e.status_code in [400, 403, 404]:
+                logger.debug(f"Suscriptores no disponibles: {e.status_code}")
+            else:
+                logger.error(f"Error obteniendo suscriptores: {e}")
+                log_service.add_log('error', f'Error obteniendo suscriptores: {e}', 'stats_service')
+            return 0
     
     async def get_uptime(self) -> Optional[timedelta]:
         """Obtener tiempo de stream"""
