@@ -51,7 +51,7 @@ class SpotifyService:
     def _authenticate(self):
         """Autenticar con Spotify usando refresh token desde variables de entorno"""
         try:
-            refresh_token = os.getenv('SPOTIFY_REFRESH_TOKEN', '')
+            refresh_token = settings.SPOTIFY_REFRESH_TOKEN
             
             if not refresh_token:
                 logger.warning("⚠️ No hay SPOTIFY_REFRESH_TOKEN configurado en variables de entorno")
