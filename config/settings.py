@@ -5,6 +5,9 @@ from config.env_manager import env_manager
 from database.token_repository import TokenRepository
 from utils.logger import get_logger
 
+# Cargar .env local solo si existe (para desarrollo)
+load_dotenv()
+
 logger = get_logger(__name__)
 
 class Settings:
@@ -23,26 +26,45 @@ class Settings:
         self._load_tokens()
         self._initialized = True
         self._validate()
-        # Verificar DATABASE_URL
         if not os.environ.get("DATABASE_URL"):
             logger.warning("⚠️ DATABASE_URL no configurada. Los tokens no se persistirán correctamente.")
 
     def _load_static_config(self):
-        """Carga configuración fija desde .env (no tokens)."""
-        env_vars = env_manager.reload()
-        self.CLIENT_ID = env_vars.get("CLIENT_ID", "")
-        self.CLIENT_SECRET = env_vars.get("CLIENT_SECRET", "")
-        self.CHANNEL = env_vars.get("CHANNEL", "")
-        self.BOT_NICK = env_vars.get("BOT_NICK", "")
-        self.BOT_ID = env_vars.get("BOT_ID", "")
-        self.BROADCASTER_ID = env_vars.get("BROADCASTER_ID", "")
-        self.SPOTIFY_CLIENT_ID = env_vars.get("SPOTIFY_CLIENT_ID", "")
-        self.SPOTIFY_CLIENT_SECRET = env_vars.get("SPOTIFY_CLIENT_SECRET", "")
-        self.EVENTSUB_CALLBACK_URL = env_vars.get("EVENTSUB_CALLBACK_URL", "")
-        self.TWITCH_WEBHOOK_SECRET = env_vars.get("TWITCH_WEBHOOK_SECRET", "")
-        self.BOT_WEBHOOK_PORT = int(env_vars.get("BOT_WEBHOOK_PORT", "5001"))
-        self.BOT_WEBHOOK_URL = env_vars.get("BOT_WEBHOOK_URL", "http://localhost:5001/webhook")
-        self.DASHBOARD_SECRET_KEY = env_vars.get("DASHBOARD_SECRET_KEY", "supersecretkey_change_me")
+        """
+        Carga configuración fija.
+        Prioriza las variables del entorno del sistema (os.environ).
+        Si no están, intenta cargarlas desde .env (a través de env_manager).
+        """
+        # Primero, intentar desde os.environ (producción)
+        self.CLIENT_ID = os.environ.get("CLIENT_ID", "")
+        self.CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "")
+        self.CHANNEL = os.environ.get("CHANNEL", "")
+        self.BOT_NICK = os.environ.get("BOT_NICK", "")
+        self.BOT_ID = os.environ.get("BOT_ID", "")
+        self.BROADCASTER_ID = os.environ.get("BROADCASTER_ID", "")
+        self.SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID", "")
+        self.SPOTIFY_CLIENT_SECRET = os.environ.get("SPOTIFY_CLIENT_SECRET", "")
+        self.EVENTSUB_CALLBACK_URL = os.environ.get("EVENTSUB_CALLBACK_URL", "")
+        self.TWITCH_WEBHOOK_SECRET = os.environ.get("TWITCH_WEBHOOK_SECRET", "")
+        self.BOT_WEBHOOK_PORT = int(os.environ.get("BOT_WEBHOOK_PORT", "5001"))
+        self.BOT_WEBHOOK_URL = os.environ.get("BOT_WEBHOOK_URL", "http://localhost:5001/webhook")
+        self.DASHBOARD_SECRET_KEY = os.environ.get("DASHBOARD_SECRET_KEY", "supersecretkey_change_me")
+
+        # Si alguna variable obligatoria sigue vacía, intentar cargarla desde .env (fallback)
+        if not self.CLIENT_ID or not self.CLIENT_SECRET:
+            env_vars = env_manager.reload()
+            if not self.CLIENT_ID:
+                self.CLIENT_ID = env_vars.get("CLIENT_ID", "")
+            if not self.CLIENT_SECRET:
+                self.CLIENT_SECRET = env_vars.get("CLIENT_SECRET", "")
+            if not self.CHANNEL:
+                self.CHANNEL = env_vars.get("CHANNEL", "")
+            if not self.BOT_NICK:
+                self.BOT_NICK = env_vars.get("BOT_NICK", "")
+            if not self.BOT_ID:
+                self.BOT_ID = env_vars.get("BOT_ID", "")
+            if not self.BROADCASTER_ID:
+                self.BROADCASTER_ID = env_vars.get("BROADCASTER_ID", "")
 
     def _load_tokens(self):
         """Carga tokens desde PostgreSQL. Si no existen, los migra desde .env."""
