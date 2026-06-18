@@ -1,57 +1,91 @@
 {% extends "base.html" %}
 
-{% block title %}VesperBot - Configuración{% endblock %}
+{% block title %}VesperBot — Configuración{% endblock %}
 {% block header %}Configuración General{% endblock %}
 
 {% block content %}
+
 <div class="dashboard-grid">
+
+    <!-- ========== PERSONALIZACIÓN DEL BOT (con imagen) ========== -->
     <div class="card">
         <div class="card-header">
-            <i class="fas fa-palette"></i>
-            <h3>Personalización del Bot</h3>
+            <div class="card-header-left">
+                <i class="fas fa-palette"></i>
+                <h3>Personalización del Bot</h3>
+            </div>
         </div>
         <div class="card-body">
+            <!-- Avatar con imagen -->
             <div class="form-group">
-                <label><i class="fas fa-crown"></i> Icono del Bot</label>
-                <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-                    <div id="icon-preview" style="font-size: 48px; padding: 12px; background: var(--bg-input); border-radius: 12px; border: 1px solid var(--border-color); min-width: 80px; text-align: center;">
+                <label><i class="fas fa-image"></i> Imagen del Bot</label>
+                <div class="avatar-editor">
+                    <div class="avatar-preview" id="avatar-preview-container">
+                        <img id="avatar-preview-img" src="" alt="Avatar del bot">
+                        <div class="avatar-placeholder" id="avatar-placeholder">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                    </div>
+                    <div class="avatar-controls">
+                        <input type="file" id="avatar-file-input" accept="image/*" style="display:none;">
+                        <button onclick="document.getElementById('avatar-file-input').click()" class="btn-secondary btn-sm">
+                            <i class="fas fa-upload"></i> Subir imagen
+                        </button>
+                        <button onclick="clearAvatar()" class="btn-danger btn-sm">
+                            <i class="fas fa-times"></i> Eliminar
+                        </button>
+                        <button onclick="saveAvatar()" class="btn-primary btn-sm">
+                            <i class="fas fa-save"></i> Guardar
+                        </button>
+                    </div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-top:6px;">
+                        <i class="fas fa-info-circle"></i> La imagen se ajustará automáticamente al círculo.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Icono (emojis/unicode) como alternativa -->
+            <div class="form-group" style="margin-top:16px; border-top:1px solid var(--border-color); padding-top:16px;">
+                <label><i class="fas fa-smile"></i> Icono alternativo (emojis)</label>
+                <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                    <div id="icon-preview" style="font-size:48px; padding:12px; background:var(--bg-input); border-radius:12px; border:1px solid var(--border-color); min-width:80px; text-align:center;">
                         🕯️
                     </div>
-                    <div style="flex: 1; min-width: 200px;">
+                    <div style="flex:1; min-width:200px;">
                         <input type="text" id="bot-icon-input" class="form-control" placeholder="Ej: 🕯️, 🤖, 👾, ⚡" value="🕯️">
-                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-                            Puedes usar emojis o texto. El icono se mostrará en el sidebar y en mensajes del bot.
+                        <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                            Usa emojis o texto. Si hay una imagen cargada, esta se usará primero.
                         </div>
                     </div>
                     <button onclick="saveBotIcon()" class="btn-primary">
                         <i class="fas fa-save"></i> Guardar Icono
                     </button>
                 </div>
-            </div>
-            <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-                <button class="btn-icon btn-sm" onclick="setIcon('🕯️')">🕯️</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('🤖')">🤖</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('👾')">👾</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('⚡')">⚡</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('🔥')">🔥</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('🌟')">🌟</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('🎯')">🎯</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('🚀')">🚀</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('💀')">💀</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('👁️')">👁️</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('🐉')">🐉</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('🌙')">🌙</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('☀️')">☀️</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('🍀')">🍀</button>
-                <button class="btn-icon btn-sm" onclick="setIcon('🎵')">🎵</button>
+                <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">
+                    <button class="btn-icon btn-sm" onclick="setIcon('🕯️')">🕯️</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('🤖')">🤖</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('👾')">👾</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('⚡')">⚡</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('🔥')">🔥</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('🌙')">🌙</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('🎯')">🎯</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('🚀')">🚀</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('💀')">💀</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('👁️')">👁️</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('🐉')">🐉</button>
+                    <button class="btn-icon btn-sm" onclick="setIcon('🌌')">🌌</button>
+                </div>
             </div>
         </div>
     </div>
 
+    <!-- ========== REDES SOCIALES ========== -->
     <div class="card">
         <div class="card-header">
-            <i class="fas fa-link"></i>
-            <h3>Redes Sociales</h3>
+            <div class="card-header-left">
+                <i class="fas fa-link"></i>
+                <h3>Redes Sociales</h3>
+            </div>
         </div>
         <div class="card-body">
             <form id="social-form">
@@ -79,193 +113,539 @@
                     <i class="fas fa-save"></i> Guardar Enlaces
                 </button>
             </form>
-            <div id="social-message" class="alert" style="display:none;margin-top:12px;"></div>
+            <div id="social-message" class="alert" style="display:none; margin-top:12px;"></div>
         </div>
     </div>
 
-    <div class="card">
+    <!-- ========== CAMBIAR CONTRASEÑA ========== -->
+    <div class="card full-width">
         <div class="card-header">
-            <i class="fas fa-key"></i>
-            <h3>Cambiar Contraseña</h3>
+            <div class="card-header-left">
+                <i class="fas fa-key"></i>
+                <h3>Cambiar Contraseña</h3>
+            </div>
         </div>
         <div class="card-body">
-            <form id="password-form">
+            <form id="password-form" style="max-width:480px;">
                 <div class="form-group">
                     <label>Contraseña actual</label>
-                    <input type="password" id="current-password" class="form-control" placeholder="Ingresa tu contraseña actual">
+                    <input type="password" id="current-password" class="form-control" placeholder="Ingresa tu contraseña actual" autocomplete="current-password">
                 </div>
                 <div class="form-group">
                     <label>Nueva contraseña</label>
-                    <input type="password" id="new-password" class="form-control" placeholder="Mínimo 6 caracteres">
+                    <input type="password" id="new-password" class="form-control" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
                 </div>
                 <div class="form-group">
                     <label>Confirmar nueva</label>
-                    <input type="password" id="confirm-password" class="form-control" placeholder="Repite la nueva contraseña">
+                    <input type="password" id="confirm-password" class="form-control" placeholder="Repite la nueva contraseña" autocomplete="new-password">
                 </div>
                 <button type="submit" class="btn-primary">
                     <i class="fas fa-key"></i> Cambiar Contraseña
                 </button>
             </form>
-            <div id="password-message" class="alert" style="display:none;margin-top:12px;"></div>
+            <div id="password-message" class="alert" style="display:none; margin-top:12px;"></div>
         </div>
     </div>
+
 </div>
 
-<script>
-function setIcon(icon) {
-    document.getElementById('bot-icon-input').value = icon;
-    document.getElementById('icon-preview').textContent = icon;
-}
-
-function saveBotIcon() {
-    const icon = document.getElementById('bot-icon-input').value.trim();
-    if (!icon) {
-        showToast('❌ El icono no puede estar vacío', 'error');
-        return;
+<!-- ============================================ -->
+<!-- STYLES (específicos de settings)            -->
+<!-- ============================================ -->
+<style>
+    /* ---- Editor de avatar ---- */
+    .avatar-editor {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        flex-wrap: wrap;
     }
-    
-    fetch('/api/settings/bot-icon', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ icon })
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) {
-            showToast('✅ Icono actualizado correctamente', 'success');
-            // Actualizar sidebar
-            document.querySelector('.brand-icon').textContent = icon;
-        } else {
-            showToast('❌ Error: ' + (data.error || 'No se pudo actualizar'), 'error');
+    .avatar-preview {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        overflow: hidden;
+        border: 3px solid var(--accent);
+        background: var(--bg-input);
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        transition: border-color var(--transition);
+    }
+    .avatar-preview:hover {
+        border-color: var(--accent-hover);
+    }
+    .avatar-preview img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: none;
+    }
+    .avatar-preview .avatar-placeholder {
+        font-size: 48px;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+    }
+    .avatar-preview .avatar-placeholder i {
+        font-size: 48px;
+        color: var(--text-muted);
+    }
+    .avatar-controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .avatar-controls .btn-sm {
+        padding: 6px 14px;
+        font-size: 13px;
+    }
+
+    /* ---- Campos de formulario ---- */
+    input[type="url"].form-control {
+        width: 100%;
+    }
+    .form-group {
+        margin-bottom: 14px;
+    }
+    .form-group:last-child {
+        margin-bottom: 0;
+    }
+    .form-group label {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+    }
+    .form-group label i {
+        margin-right: 6px;
+        color: var(--accent);
+        width: 18px;
+        text-align: center;
+    }
+
+    /* ---- Botones de iconos ---- */
+    .btn-icon.btn-sm {
+        font-size: 20px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        transition: var(--transition);
+    }
+    .btn-icon.btn-sm:hover {
+        background: var(--bg-hover);
+        border-color: var(--accent);
+        transform: scale(1.08);
+    }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 768px) {
+        .avatar-editor {
+            flex-direction: column;
+            align-items: flex-start;
         }
-    })
-    .catch(() => showToast('❌ Error al actualizar icono', 'error'));
-}
-
-function loadSocialLinks() {
-    fetch('/api/settings/social')
-        .then(res => res.json())
-        .then(links => {
-            document.getElementById('social-discord').value = links.discord || '';
-            document.getElementById('social-twitter').value = links.twitter || '';
-            document.getElementById('social-instagram').value = links.instagram || '';
-            document.getElementById('social-youtube').value = links.youtube || '';
-            document.getElementById('social-tiktok').value = links.tiktok || '';
-        })
-        .catch(err => console.error('Error cargando enlaces:', err));
-}
-
-function loadBotIcon() {
-    fetch('/api/settings/bot-icon')
-        .then(res => res.json())
-        .then(data => {
-            if (data.icon) {
-                document.getElementById('bot-icon-input').value = data.icon;
-                document.getElementById('icon-preview').textContent = data.icon;
-                document.querySelector('.brand-icon').textContent = data.icon;
-            }
-        })
-        .catch(() => {});
-}
-
-function showToast(message, type) {
-    if (typeof window.showToast === 'function') {
-        window.showToast(message, type);
-    } else {
-        alert(message);
+        .avatar-preview {
+            width: 80px;
+            height: 80px;
+        }
+        .avatar-preview .avatar-placeholder i {
+            font-size: 36px;
+        }
+        #icon-preview {
+            font-size: 36px !important;
+            min-width: 60px !important;
+            padding: 8px !important;
+        }
+        .btn-icon.btn-sm {
+            font-size: 18px;
+            padding: 4px 8px;
+        }
     }
-}
+    @media (max-width: 480px) {
+        .avatar-preview {
+            width: 70px;
+            height: 70px;
+        }
+        .avatar-preview .avatar-placeholder i {
+            font-size: 30px;
+        }
+        #icon-preview {
+            font-size: 28px !important;
+            min-width: 50px !important;
+            padding: 6px !important;
+        }
+        .btn-icon.btn-sm {
+            font-size: 16px;
+            padding: 4px 6px;
+        }
+        #password-form {
+            max-width: 100% !important;
+        }
+        .avatar-controls .btn-sm {
+            font-size: 12px;
+            padding: 4px 10px;
+        }
+    }
+</style>
 
-loadSocialLinks();
-loadBotIcon();
+<!-- ============================================ -->
+<!-- SCRIPTS (funcionalidad + compresión de imagen) -->
+<!-- ============================================ -->
+<script>
+    // ============================================
+    // MANEJO DE AVATAR (IMAGEN)
+    // ============================================
+    let currentAvatarData = null; // data URL o null
 
-// Guardar enlaces sociales
-document.getElementById('social-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    const platforms = ['discord', 'twitter', 'instagram', 'youtube', 'tiktok'];
-    let saved = 0;
-    let total = platforms.length;
-    let hasError = false;
-    
-    platforms.forEach(platform => {
-        const url = document.getElementById(`social-${platform}`).value.trim();
-        if (url) {
+    // Cargar avatar existente al iniciar
+    function loadAvatar() {
+        fetch('/api/settings/bot-icon')
+            .then(res => res.json())
+            .then(data => {
+                const icon = data.icon || '';
+                // Si el icono empieza con "data:image", es una imagen
+                if (icon.startsWith('data:image')) {
+                    currentAvatarData = icon;
+                    const img = document.getElementById('avatar-preview-img');
+                    const placeholder = document.getElementById('avatar-placeholder');
+                    img.src = icon;
+                    img.style.display = 'block';
+                    placeholder.style.display = 'none';
+                } else {
+                    // Si no, mostrar placeholder
+                    currentAvatarData = null;
+                    const img = document.getElementById('avatar-preview-img');
+                    const placeholder = document.getElementById('avatar-placeholder');
+                    img.style.display = 'none';
+                    placeholder.style.display = 'flex';
+                }
+            })
+            .catch(() => {});
+    }
+
+    // Seleccionar imagen con redimensionamiento y compresión
+    document.getElementById('avatar-file-input').addEventListener('change', function(e) {
+        const file = this.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            const img = new Image();
+            img.onload = function() {
+                // Tamaño máximo deseado (200x200)
+                const MAX_SIZE = 200;
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > MAX_SIZE) {
+                        height = height * (MAX_SIZE / width);
+                        width = MAX_SIZE;
+                    }
+                } else {
+                    if (height > MAX_SIZE) {
+                        width = width * (MAX_SIZE / height);
+                        height = MAX_SIZE;
+                    }
+                }
+
+                // Dibujar en canvas y exportar como JPEG con calidad 0.7
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+
+                // Mostrar previsualización
+                const previewImg = document.getElementById('avatar-preview-img');
+                const placeholder = document.getElementById('avatar-placeholder');
+                previewImg.src = dataUrl;
+                previewImg.style.display = 'block';
+                placeholder.style.display = 'none';
+                currentAvatarData = dataUrl;
+                showToast('Imagen cargada y comprimida. Presiona "Guardar" para aplicar.', 'info');
+            };
+            img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+        this.value = ''; // Resetear input
+    });
+
+    // Guardar avatar (imagen)
+    function saveAvatar() {
+        if (!currentAvatarData) {
+            showToast('No hay imagen para guardar', 'error');
+            return;
+        }
+        // Guardar en el campo bot_icon
+        fetch('/api/settings/bot-icon', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ icon: currentAvatarData })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Imagen del bot actualizada', 'success');
+                    // Actualizar sidebar
+                    const brandIcon = document.querySelector('.brand-icon');
+                    if (brandIcon) {
+                        brandIcon.innerHTML = `<img src="${currentAvatarData}" style="width:32px; height:32px; border-radius:50%; object-fit:cover;">`;
+                    }
+                } else {
+                    showToast('Error: ' + (data.error || 'No se pudo actualizar'), 'error');
+                }
+            })
+            .catch(() => {
+                showToast('Error al guardar imagen', 'error');
+            });
+    }
+
+    // Eliminar avatar (volver a emoji)
+    function clearAvatar() {
+        const img = document.getElementById('avatar-preview-img');
+        const placeholder = document.getElementById('avatar-placeholder');
+        img.style.display = 'none';
+        placeholder.style.display = 'flex';
+        currentAvatarData = null;
+
+        fetch('/api/settings/bot-icon', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ icon: '🕯️' })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Imagen eliminada, usando icono por defecto', 'success');
+                    const brandIcon = document.querySelector('.brand-icon');
+                    if (brandIcon) brandIcon.textContent = '🕯️';
+                    document.getElementById('bot-icon-input').value = '🕯️';
+                    document.getElementById('icon-preview').textContent = '🕯️';
+                } else {
+                    showToast('Error al eliminar imagen', 'error');
+                }
+            })
+            .catch(() => {
+                showToast('Error al eliminar imagen', 'error');
+            });
+    }
+
+    // ============================================
+    // SELECCIONAR ICONO (emojis)
+    // ============================================
+    function setIcon(icon) {
+        document.getElementById('bot-icon-input').value = icon;
+        document.getElementById('icon-preview').textContent = icon;
+    }
+
+    // ============================================
+    // GUARDAR ICONO (emojis/texto)
+    // ============================================
+    function saveBotIcon() {
+        const icon = document.getElementById('bot-icon-input').value.trim();
+        if (!icon) {
+            showToast('El icono no puede estar vacío', 'error');
+            return;
+        }
+
+        fetch('/api/settings/bot-icon', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ icon })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Icono actualizado correctamente', 'success');
+                    const brandIcon = document.querySelector('.brand-icon');
+                    if (brandIcon && !currentAvatarData) {
+                        brandIcon.textContent = icon;
+                    }
+                    document.getElementById('icon-preview').textContent = icon;
+                } else {
+                    showToast('Error: ' + (data.error || 'No se pudo actualizar'), 'error');
+                }
+            })
+            .catch(() => {
+                showToast('Error al actualizar icono', 'error');
+            });
+    }
+
+    // ============================================
+    // CARGAR ENLACES SOCIALES
+    // ============================================
+    function loadSocialLinks() {
+        fetch('/api/settings/social')
+            .then(res => res.json())
+            .then(links => {
+                document.getElementById('social-discord').value = links.discord || '';
+                document.getElementById('social-twitter').value = links.twitter || '';
+                document.getElementById('social-instagram').value = links.instagram || '';
+                document.getElementById('social-youtube').value = links.youtube || '';
+                document.getElementById('social-tiktok').value = links.tiktok || '';
+            })
+            .catch(err => {
+                console.error('Error cargando enlaces:', err);
+            });
+    }
+
+    // ============================================
+    // CARGAR ICONO Y AVATAR
+    // ============================================
+    function loadBotIcon() {
+        fetch('/api/settings/bot-icon')
+            .then(res => res.json())
+            .then(data => {
+                const icon = data.icon || '🕯️';
+                if (!icon.startsWith('data:image')) {
+                    document.getElementById('bot-icon-input').value = icon;
+                    document.getElementById('icon-preview').textContent = icon;
+                    const brandIcon = document.querySelector('.brand-icon');
+                    if (brandIcon) brandIcon.textContent = icon;
+                }
+            })
+            .catch(() => {});
+    }
+
+    // ============================================
+    // GUARDAR ENLACES SOCIALES
+    // ============================================
+    document.getElementById('social-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        const platforms = ['discord', 'twitter', 'instagram', 'youtube', 'tiktok'];
+        let saved = 0;
+        let total = platforms.length;
+        let hasError = false;
+        const messageEl = document.getElementById('social-message');
+
+        messageEl.style.display = 'none';
+        messageEl.className = 'alert';
+
+        platforms.forEach(platform => {
+            const url = document.getElementById(`social-${platform}`).value.trim();
+
+            if (!url) {
+                saved++;
+                if (saved === total) {
+                    if (hasError) {
+                        messageEl.className = 'alert alert-warning';
+                        messageEl.innerHTML = '⚠️ Algunos enlaces no se pudieron actualizar';
+                        messageEl.style.display = 'block';
+                    } else {
+                        showToast('Enlaces actualizados', 'success');
+                    }
+                }
+                return;
+            }
+
             fetch('/api/settings/social', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ platform, url })
             })
+                .then(res => res.json())
+                .then(data => {
+                    saved++;
+                    if (data.error) hasError = true;
+                    if (saved === total) {
+                        if (hasError) {
+                            messageEl.className = 'alert alert-warning';
+                            messageEl.innerHTML = '⚠️ Algunos enlaces no se pudieron actualizar';
+                            messageEl.style.display = 'block';
+                            showToast('Algunos enlaces fallaron', 'warning');
+                        } else {
+                            showToast('Todos los enlaces sociales actualizados', 'success');
+                            loadSocialLinks();
+                        }
+                    }
+                })
+                .catch(() => {
+                    saved++;
+                    hasError = true;
+                    if (saved === total) {
+                        messageEl.className = 'alert alert-warning';
+                        messageEl.innerHTML = '⚠️ Algunos enlaces no se pudieron actualizar';
+                        messageEl.style.display = 'block';
+                        showToast('Algunos enlaces fallaron', 'warning');
+                    }
+                });
+        });
+    });
+
+    // ============================================
+    // CAMBIAR CONTRASEÑA
+    // ============================================
+    document.getElementById('password-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        const current = document.getElementById('current-password').value;
+        const newPass = document.getElementById('new-password').value;
+        const confirm = document.getElementById('confirm-password').value;
+        const messageEl = document.getElementById('password-message');
+
+        messageEl.style.display = 'none';
+        messageEl.className = 'alert';
+
+        if (newPass !== confirm) {
+            messageEl.className = 'alert alert-error';
+            messageEl.innerHTML = '❌ Las contraseñas no coinciden';
+            messageEl.style.display = 'block';
+            return;
+        }
+
+        if (newPass.length < 6) {
+            messageEl.className = 'alert alert-error';
+            messageEl.innerHTML = '❌ La nueva contraseña debe tener al menos 6 caracteres';
+            messageEl.style.display = 'block';
+            return;
+        }
+
+        fetch('/api/settings/password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current, new: newPass })
+        })
             .then(res => res.json())
             .then(data => {
-                saved++;
-                if (data.error) hasError = true;
-                if (saved === total) {
-                    if (hasError) {
-                        showToast('⚠️ Algunos enlaces no se pudieron actualizar', 'warning');
-                    } else {
-                        showToast('✅ Todos los enlaces sociales actualizados correctamente', 'success');
-                    }
-                    loadSocialLinks();
+                if (data.error) {
+                    messageEl.className = 'alert alert-error';
+                    messageEl.innerHTML = '❌ ' + data.error;
+                    messageEl.style.display = 'block';
+                } else {
+                    showToast('Contraseña actualizada correctamente', 'success');
+                    document.getElementById('current-password').value = '';
+                    document.getElementById('new-password').value = '';
+                    document.getElementById('confirm-password').value = '';
+                    messageEl.style.display = 'none';
                 }
             })
             .catch(() => {
-                saved++;
-                hasError = true;
-                if (saved === total) {
-                    showToast('⚠️ Algunos enlaces no se pudieron actualizar', 'warning');
-                }
+                messageEl.className = 'alert alert-error';
+                messageEl.innerHTML = '❌ Error al cambiar la contraseña';
+                messageEl.style.display = 'block';
             });
-        } else {
-            saved++;
-            if (saved === total) {
-                if (hasError) {
-                    showToast('⚠️ Algunos enlaces no se pudieron actualizar', 'warning');
-                } else {
-                    showToast('✅ Enlaces actualizados', 'success');
-                }
-            }
-        }
     });
-});
 
-// Cambiar contraseña
-document.getElementById('password-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    const current = document.getElementById('current-password').value;
-    const newPass = document.getElementById('new-password').value;
-    const confirm = document.getElementById('confirm-password').value;
-    
-    if (newPass !== confirm) {
-        showToast('❌ Las contraseñas no coinciden', 'error');
-        return;
-    }
-    
-    if (newPass.length < 6) {
-        showToast('❌ La nueva contraseña debe tener al menos 6 caracteres', 'error');
-        return;
-    }
-    
-    fetch('/api/settings/password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ current, new: newPass })
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.error) {
-            showToast('❌ ' + data.error, 'error');
-        } else {
-            showToast('✅ Contraseña actualizada correctamente', 'success');
-            document.getElementById('current-password').value = '';
-            document.getElementById('new-password').value = '';
-            document.getElementById('confirm-password').value = '';
-        }
-    })
-    .catch(err => {
-        showToast('❌ Error al cambiar la contraseña', 'error');
+    // ============================================
+    // INICIALIZACIÓN
+    // ============================================
+    document.addEventListener('DOMContentLoaded', function () {
+        loadAvatar();
+        loadBotIcon();
+        loadSocialLinks();
     });
-});
+
 </script>
+
 {% endblock %}

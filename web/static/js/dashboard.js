@@ -1,6 +1,14 @@
 /**
  * VesperBot - Dashboard JavaScript
- * Funciones comunes para el dashboard con polling inteligente y caché persistente
+ * 
+ * Módulo central que gestiona:
+ * - API unificada con caché persistente (sessionStorage)
+ * - Polling inteligente con requestIdleCallback
+ * - Notificaciones tipo toast
+ * - Modales de confirmación
+ * - Actualización de estado del bot
+ * 
+ * Todas las funciones se mantienen compatibles con el backend existente.
  */
 
 // ============================================
@@ -17,26 +25,26 @@ function showToast(message, type = 'success', duration = 4000) {
 
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
-    
+
     const icons = {
-        success: '✅',
-        error: '❌',
-        warning: '⚠️',
-        info: 'ℹ️'
+        success: 'fa-check-circle',
+        error: 'fa-times-circle',
+        warning: 'fa-exclamation-circle',
+        info: 'fa-info-circle'
     };
-    
+
     toast.innerHTML = `
-        <span>${icons[type] || ''}</span>
-        <span>${message}</span>
+        <i class="fas ${icons[type] || 'fa-info-circle'} toast-icon"></i>
+        <span class="toast-message">${message}</span>
         <button class="toast-close">&times;</button>
     `;
-    
+
     container.appendChild(toast);
-    
-    toast.querySelector('.toast-close').addEventListener('click', function() {
+
+    toast.querySelector('.toast-close').addEventListener('click', function () {
         toast.remove();
     });
-    
+
     setTimeout(() => {
         if (toast.parentNode) {
             toast.style.opacity = '0';
@@ -55,12 +63,12 @@ function showModal(title, message, confirmText = 'Confirmar', cancelText = 'Canc
     return new Promise((resolve) => {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
-        
+
         const modal = document.createElement('div');
         modal.className = 'modal-box';
-        
+
         const buttonClass = confirmType === 'danger' ? 'btn-danger' : 'btn-primary';
-        
+
         modal.innerHTML = `
             <h3>${title}</h3>
             <p>${message}</p>
@@ -69,24 +77,24 @@ function showModal(title, message, confirmText = 'Confirmar', cancelText = 'Canc
                 <button class="${buttonClass}" id="modal-confirm">${confirmText}</button>
             </div>
         `;
-        
+
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
-        
+
         const confirmBtn = modal.querySelector('#modal-confirm');
         const cancelBtn = modal.querySelector('#modal-cancel');
-        
+
         function closeModal(result) {
             overlay.remove();
             resolve(result);
         }
-        
+
         confirmBtn.addEventListener('click', () => closeModal(true));
         cancelBtn.addEventListener('click', () => closeModal(false));
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) closeModal(false);
         });
-        
+
         document.addEventListener('keydown', function handler(e) {
             if (e.key === 'Escape') {
                 closeModal(false);
@@ -108,15 +116,15 @@ class DashboardAPI {
         this.isFetching = false;
         this.subscribers = [];
         this.endpoint = '/api/dashboard-data';
-        this._pendingRefresh = false;
+        this._pendingRefresh = null;
         this._isPageVisible = true;
         this._idleCallbackId = null;
         this._pollingTimeout = null;
         this._initialized = false;
-        
+
         // Cargar caché desde sessionStorage al iniciar
         this.cache = this._loadFromStorage();
-        
+
         // Detectar visibilidad de la pestaña
         document.addEventListener('visibilitychange', () => {
             this._isPageVisible = document.visibilityState === 'visible';
@@ -125,10 +133,9 @@ class DashboardAPI {
                 this.refresh().catch(() => {});
             }
         });
-        
+
         // Si hay datos en caché, notificar inmediatamente a los suscriptores
         if (this.cache && this.cache.data) {
-            // Usar requestAnimationFrame para no bloquear el renderizado inicial
             requestAnimationFrame(() => {
                 this.notifySubscribers(this.cache.data);
             });
@@ -187,12 +194,12 @@ class DashboardAPI {
 
     async getData(forceRefresh = false) {
         const now = Date.now();
-        
+
         // Si la página no está visible y no se fuerza, devolver caché si existe
         if (!this._isPageVisible && !forceRefresh) {
             return this.cache?.data || null;
         }
-        
+
         // Verificar si la caché es válida
         if (!forceRefresh && this.cache && this.cache.data) {
             if (now - this.cache.timestamp < this.cacheTtl) {
@@ -214,7 +221,7 @@ class DashboardAPI {
         }
 
         this.isFetching = true;
-        
+
         try {
             const url = forceRefresh ? `${this.endpoint}?force=true` : this.endpoint;
             const response = await fetch(url);
@@ -222,19 +229,19 @@ class DashboardAPI {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            
+
             // Guardar en caché de memoria y sessionStorage
             this.cache = {
                 data: data,
                 timestamp: now
             };
             this._saveToStorage(data);
-            
+
             this.isFetching = false;
             this._initialized = true;
-            
+
             this.notifySubscribers(data);
-            
+
             return data;
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
@@ -250,7 +257,6 @@ class DashboardAPI {
         if (this._pendingRefresh) {
             return this._pendingRefresh;
         }
-        
         this._pendingRefresh = this.getData(true);
         try {
             const result = await this._pendingRefresh;
@@ -264,7 +270,7 @@ class DashboardAPI {
         this.cacheTtl = interval;
         this._schedulePoll();
     }
-    
+
     _schedulePoll() {
         // Cancelar cualquier polling pendiente
         if (this._pollingTimeout) {
@@ -275,8 +281,7 @@ class DashboardAPI {
             cancelIdleCallback(this._idleCallbackId);
             this._idleCallbackId = null;
         }
-        
-        // Usar requestIdleCallback para no bloquear la UI
+
         const doPoll = () => {
             // Solo hacer polling si la página es visible
             if (this._isPageVisible) {
@@ -284,13 +289,13 @@ class DashboardAPI {
                     console.warn('Polling error:', err);
                 });
             }
-            
+
             // Programar el siguiente ciclo
             this._pollingTimeout = setTimeout(() => {
                 this._schedulePoll();
             }, this.cacheTtl);
         };
-        
+
         // Usar requestIdleCallback si está disponible
         if ('requestIdleCallback' in window) {
             this._idleCallbackId = requestIdleCallback(() => {
@@ -322,28 +327,13 @@ const dashboardAPI = new DashboardAPI();
 window.dashboardAPI = dashboardAPI;
 window.showToast = showToast;
 window.showModal = showModal;
-window.formatTime = formatTime;
-window.formatDate = formatDate;
-window.truncate = truncate;
-window.updateBotStatus = updateBotStatus;
-window.refreshModerationData = refreshModerationData;
-window.forceRefresh = function() {
-    dashboardAPI.refresh().then(() => {
-        showToast('🔄 Datos actualizados', 'info');
-    }).catch(() => {
-        showToast('❌ Error al actualizar', 'error');
-    });
-};
 
-// ============================================
-// UTILIDADES
-// ============================================
-
-function formatTime(seconds) {
+// Funciones de utilidad expuestas globalmente
+window.formatTime = function (seconds) {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    
+
     if (hours > 0) {
         return `${hours}h ${minutes}m ${secs}s`;
     } else if (minutes > 0) {
@@ -351,17 +341,17 @@ function formatTime(seconds) {
     } else {
         return `${secs}s`;
     }
-}
+};
 
-function formatDate(dateString) {
+window.formatDate = function (dateString) {
     const date = new Date(dateString);
     return date.toLocaleString();
-}
+};
 
-function truncate(text, length = 50) {
+window.truncate = function (text, length = 50) {
     if (text.length <= length) return text;
     return text.substring(0, length) + '...';
-}
+};
 
 // ============================================
 // ESTADO DEL BOT (INDEPENDIENTE DEL STREAM)
@@ -372,7 +362,7 @@ async function updateBotStatus() {
         const data = await dashboardAPI.getData();
         const emoji = document.getElementById('status-emoji');
         const text = document.getElementById('status-text');
-        
+
         // Verificar si el bot está conectado
         if (data.status && data.status.connected) {
             emoji.textContent = '🟢';
@@ -383,7 +373,7 @@ async function updateBotStatus() {
             emoji.className = 'status-emoji offline';
             text.textContent = 'Desconectado';
         }
-        
+
         return data;
     } catch (error) {
         console.error('Error actualizando estado:', error);
@@ -398,14 +388,14 @@ async function updateBotStatus() {
 }
 
 // ============================================
-// REFRESH MODERATION DATA
+// REFRESH MODERATION DATA (legacy support)
 // ============================================
 
 function refreshModerationData() {
     dashboardAPI.refresh().then(() => {
-        showToast('🔄 Datos de moderación actualizados', 'info');
+        showToast('Datos de moderación actualizados', 'info');
     }).catch(() => {
-        showToast('❌ Error al actualizar datos', 'error');
+        showToast('Error al actualizar datos', 'error');
     });
 }
 
@@ -413,7 +403,7 @@ function refreshModerationData() {
 // INICIALIZACIÓN
 // ============================================
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // Iniciar polling (30 segundos)
     dashboardAPI.startPolling(30000);
     // Actualizar estado del bot (usando caché si existe)
@@ -422,8 +412,15 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ============================================
-// EXPORTAR FUNCIONES
+// EXPORTAR PARA USO EN OTROS SCRIPTS
 // ============================================
 
 window.apiFetch = dashboardAPI.getData.bind(dashboardAPI);
 window.dashboardAPI = dashboardAPI;
+window.forceRefresh = function () {
+    dashboardAPI.refresh().then(() => {
+        showToast('Datos actualizados', 'info');
+    }).catch(() => {
+        showToast('Error al actualizar', 'error');
+    });
+};

@@ -3,185 +3,275 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}VesperBot Dashboard{% endblock %}</title>
+    <title>{% block title %}VesperBot — Dashboard{% endblock %}</title>
+
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700;14..32,800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <!-- Custom Styles -->
     <link rel="stylesheet" href="/static/css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
-        /* Asegurar que los botones sean visibles */
-        .btn-icon {
-            color: var(--text-primary) !important;
-        }
-        .btn-icon.btn-success {
-            color: #fff !important;
-        }
-        .btn-icon.btn-danger {
-            color: #fff !important;
-        }
-        .btn-icon.btn-info {
-            color: #fff !important;
-            background: var(--color-info);
-        }
-        .btn-icon.btn-info:hover {
-            opacity: 0.8;
-        }
-        .badge {
-            background: var(--color-accent);
-            color: #fff;
-            padding: 2px 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        /* Estado del bot con emoji */
-        .status-emoji {
-            font-size: 16px;
-            line-height: 1;
-            transition: color 0.3s ease;
-        }
-        .status-emoji.online {
-            color: var(--color-success);
-        }
-        .status-emoji.offline {
-            color: var(--color-danger);
-        }
-        /* Sidebar responsive improvements */
-        @media (max-width: 768px) {
-            .sidebar {
-                width: 72px;
-            }
-            .sidebar-brand .brand-text,
-            .menu-item a span,
-            .sidebar-footer .logout-btn span {
-                display: none;
-            }
-            .sidebar-brand {
-                justify-content: center;
-                padding: 0 0 16px 0;
-            }
-            .menu-item a {
-                justify-content: center;
-                padding: 10px;
-            }
-            .main-content {
-                padding: 16px;
-            }
-            .top-header h1 {
-                font-size: 20px;
-            }
-        }
-        @media (max-width: 480px) {
-            .bot-status #status-text {
-                display: none;
-            }
-        }
+        /* Asegurar que los botones mantengan colores consistentes */
+        .btn-icon { color: var(--text-secondary) !important; }
+        .btn-icon:hover { color: var(--accent) !important; }
+        .btn-primary i, .btn-primary svg { color: #fff !important; }
+        .btn-danger i, .btn-danger svg { color: #fff !important; }
+        .btn-success i, .btn-success svg { color: #fff !important; }
+        .badge { background: var(--accent); color: #fff; padding: 2px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .text-muted { color: var(--text-muted); }
     </style>
 </head>
 <body>
+
     <div class="dashboard">
-        <!-- Sidebar -->
-        <nav class="sidebar">
+
+        <!-- ========== SIDEBAR ========== -->
+        <aside class="sidebar" id="mainSidebar">
+            <!-- Bot Avatar & Name -->
             <div class="sidebar-brand">
-                <span class="brand-icon" id="brand-icon">🕯️</span>
-                <span class="brand-text">VesperBot</span>
+                <div class="avatar-wrapper">
+                    <img id="sidebar-avatar" src="" alt="Bot avatar" class="bot-avatar">
+                    <div class="avatar-fallback" id="avatar-fallback">V</div>
+                </div>
+                <span class="brand-name" id="sidebar-bot-name">VesperBot</span>
             </div>
-            
-            <ul class="sidebar-menu">
-                <li class="menu-item {% if active_page == 'index' %}active{% endif %}">
-                    <a href="/">
-                        <i class="fas fa-home"></i>
-                        <span>Dashboard</span>
-                    </a>
-                </li>
-                <li class="menu-item {% if active_page == 'commands' %}active{% endif %}">
-                    <a href="/commands">
-                        <i class="fas fa-terminal"></i>
-                        <span>Comandos</span>
-                    </a>
-                </li>
-                <li class="menu-item {% if active_page == 'spotify' %}active{% endif %}">
-                    <a href="/spotify">
-                        <i class="fas fa-music"></i>
-                        <span>Spotify</span>
-                    </a>
-                </li>
-                <li class="menu-item {% if active_page == 'moderation' %}active{% endif %}">
-                    <a href="/moderation">
-                        <i class="fas fa-shield-alt"></i>
-                        <span>Moderación</span>
-                    </a>
-                </li>
-                <li class="menu-item {% if active_page == 'stats' %}active{% endif %}">
-                    <a href="/stats">
-                        <i class="fas fa-chart-bar"></i>
-                        <span>Estadísticas</span>
-                    </a>
-                </li>
-                <li class="menu-item {% if active_page == 'logs' %}active{% endif %}">
-                    <a href="/logs">
-                        <i class="fas fa-list-ul"></i>
-                        <span>Logs</span>
-                    </a>
-                </li>
-                <li class="menu-item {% if active_page == 'settings' %}active{% endif %}">
-                    <a href="/settings">
-                        <i class="fas fa-cog"></i>
-                        <span>Configuración</span>
-                    </a>
-                </li>
-            </ul>
-            
+
+            <!-- Navigation -->
+            <nav class="sidebar-nav">
+                <ul class="nav-list">
+                    <li class="nav-item {% if active_page == 'index' %}active{% endif %}">
+                        <a href="/">
+                            <i class="fas fa-gauge-high"></i>
+                            <span>Dashboard</span>
+                        </a>
+                    </li>
+                    <li class="nav-item {% if active_page == 'commands' %}active{% endif %}">
+                        <a href="/commands">
+                            <i class="fas fa-terminal"></i>
+                            <span>Comandos</span>
+                        </a>
+                    </li>
+                    <li class="nav-item {% if active_page == 'spotify' %}active{% endif %}">
+                        <a href="/spotify">
+                            <i class="fas fa-music"></i>
+                            <span>Spotify</span>
+                        </a>
+                    </li>
+                    <li class="nav-item {% if active_page == 'moderation' %}active{% endif %}">
+                        <a href="/moderation">
+                            <i class="fas fa-shield"></i>
+                            <span>Moderación</span>
+                        </a>
+                    </li>
+                    <li class="nav-item {% if active_page == 'stats' %}active{% endif %}">
+                        <a href="/stats">
+                            <i class="fas fa-chart-line"></i>
+                            <span>Estadísticas</span>
+                        </a>
+                    </li>
+                    <li class="nav-item {% if active_page == 'logs' %}active{% endif %}">
+                        <a href="/logs">
+                            <i class="fas fa-list-ul"></i>
+                            <span>Logs</span>
+                        </a>
+                    </li>
+                    <li class="nav-item {% if active_page == 'settings' %}active{% endif %}">
+                        <a href="/settings">
+                            <i class="fas fa-sliders"></i>
+                            <span>Configuración</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+
+            <!-- Sidebar Footer -->
             <div class="sidebar-footer">
-                <a href="/logout" class="logout-btn">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span>Cerrar Sesión</span>
+                <div class="user-info">
+                    <span class="user-name" id="sidebar-user-name">Admin</span>
+                    <span class="user-role">Streamer</span>
+                </div>
+                <a href="/logout" class="logout-btn" title="Cerrar sesión">
+                    <i class="fas fa-right-from-bracket"></i>
+                    <span>Salir</span>
                 </a>
             </div>
-        </nav>
+        </aside>
 
-        <!-- Main Content -->
+        <!-- ========== MAIN CONTENT ========== -->
         <main class="main-content">
-            <header class="top-header">
-                <div class="header-left">
-                    <h1>{% block header %}Dashboard{% endblock %}</h1>
+
+            <!-- Top Bar -->
+            <header class="top-bar">
+                <div class="top-bar-left">
+                    <h1 class="page-title">{% block header %}Dashboard{% endblock %}</h1>
                 </div>
-                <div class="header-right">
-                    <span class="bot-status" id="bot-status">
-                        <span class="status-emoji online" id="status-emoji">🟢</span>
-                        <span id="status-text">Conectado</span>
-                    </span>
+                <div class="top-bar-right">
+                    <div class="connection-badge" id="connectionBadge">
+                        <span class="status-dot online" id="statusDot"></span>
+                        <span id="statusText">Conectado</span>
+                    </div>
                 </div>
             </header>
 
-            <div class="content-body">
+            <!-- Page Content -->
+            <div class="page-content">
                 {% block content %}{% endblock %}
             </div>
+
         </main>
     </div>
 
-    <!-- Cargar primero dashboard.js (define dashboardAPI) -->
+    <!-- ========== SCRIPTS ========== -->
+
+    <!-- jQuery (legacy support) -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <!-- Dashboard Core JS (preserves all existing functionality) -->
     <script src="/static/js/dashboard.js"></script>
-    
-    <!-- Cargar icono guardado -->
+
+    <!-- Sidebar & Avatar loader (actualizado para soportar imágenes Base64) -->
     <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        fetch('/api/settings/bot-icon')
-            .then(res => res.json())
-            .then(data => {
-                if (data.icon) {
-                    const iconElement = document.getElementById('brand-icon');
-                    if (iconElement) {
-                        iconElement.textContent = data.icon;
+        (function() {
+            const avatarImg = document.getElementById('sidebar-avatar');
+            const fallback = document.getElementById('avatar-fallback');
+            const nameEl = document.getElementById('sidebar-bot-name');
+
+            fetch('/api/settings/bot-icon')
+                .then(res => res.json())
+                .then(data => {
+                    const icon = data.icon || '🕯️';
+                    // Si es una imagen Base64
+                    if (icon.startsWith('data:image')) {
+                        avatarImg.src = icon;
+                        avatarImg.style.display = 'block';
+                        fallback.style.display = 'none';
+                    } 
+                    // Si es un emoji o texto
+                    else if (icon.match(/[^\w\s]/)) {
+                        fallback.textContent = icon;
+                        fallback.style.display = 'flex';
+                        avatarImg.style.display = 'none';
+                    } 
+                    // Si es una URL de imagen
+                    else {
+                        avatarImg.src = icon;
+                        avatarImg.style.display = 'block';
+                        fallback.style.display = 'none';
                     }
+                })
+                .catch(() => {
+                    fallback.textContent = 'V';
+                    fallback.style.display = 'flex';
+                    avatarImg.style.display = 'none';
+                });
+
+            // Nombre del bot
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.bot_name) nameEl.textContent = data.bot_name;
+                })
+                .catch(() => {});
+
+            // Usuario
+            const userEl = document.getElementById('sidebar-user-name');
+            if (userEl) {
+                fetch('/api/me')
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.username) userEl.textContent = data.username;
+                    })
+                    .catch(() => {});
+            }
+        })();
+
+        // Sidebar hover expand
+        (function() {
+            const sidebar = document.getElementById('mainSidebar');
+            let expandTimer = null;
+
+            sidebar.addEventListener('mouseenter', function() {
+                clearTimeout(expandTimer);
+                this.classList.add('expanded');
+            });
+
+            sidebar.addEventListener('mouseleave', function() {
+                expandTimer = setTimeout(() => {
+                    this.classList.remove('expanded');
+                }, 100);
+            });
+
+            // Touch support: toggle on tap
+            sidebar.addEventListener('touchstart', function(e) {
+                if (e.target.closest('a')) return;
+                this.classList.toggle('expanded');
+            });
+        })();
+
+        // Connection status updater
+        (function() {
+            function updateStatus() {
+                const dot = document.getElementById('statusDot');
+                const text = document.getElementById('statusText');
+                const badge = document.getElementById('connectionBadge');
+
+                if (window.dashboardAPI && typeof window.dashboardAPI.getData === 'function') {
+                    window.dashboardAPI.getData().then(data => {
+                        const connected = data?.status?.connected !== false;
+                        const live = data?.status?.live || false;
+
+                        if (connected) {
+                            dot.className = 'status-dot online';
+                            text.textContent = live ? 'En Vivo' : 'Conectado';
+                            badge.className = 'connection-badge online';
+                        } else {
+                            dot.className = 'status-dot offline';
+                            text.textContent = 'Desconectado';
+                            badge.className = 'connection-badge offline';
+                        }
+                    }).catch(() => {
+                        dot.className = 'status-dot offline';
+                        text.textContent = 'Desconectado';
+                        badge.className = 'connection-badge offline';
+                    });
                 }
-            })
-            .catch(() => {});
-    });
+            }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                setTimeout(updateStatus, 500);
+
+                if (window.dashboardAPI && typeof window.dashboardAPI.subscribe === 'function') {
+                    window.dashboardAPI.subscribe(function(data) {
+                        const dot = document.getElementById('statusDot');
+                        const text = document.getElementById('statusText');
+                        const badge = document.getElementById('connectionBadge');
+                        const connected = data?.status?.connected !== false;
+                        const live = data?.status?.live || false;
+
+                        if (connected) {
+                            dot.className = 'status-dot online';
+                            text.textContent = live ? 'En Vivo' : 'Conectado';
+                            badge.className = 'connection-badge online';
+                        } else {
+                            dot.className = 'status-dot offline';
+                            text.textContent = 'Desconectado';
+                            badge.className = 'connection-badge offline';
+                        }
+                    });
+                }
+            });
+        })();
     </script>
-    
-    <!-- Luego cargar los scripts específicos de cada página -->
+
+    <!-- Page-specific scripts -->
     {% block scripts %}{% endblock %}
+
 </body>
 </html>

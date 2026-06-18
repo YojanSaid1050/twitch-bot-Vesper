@@ -1,600 +1,789 @@
 {% extends "base.html" %}
 
-{% block title %}VesperBot - Dashboard{% endblock %}
+{% block title %}VesperBot — Dashboard{% endblock %}
 {% block header %}Panel de Control{% endblock %}
 
 {% block content %}
 <div class="dashboard-grid">
-    <!-- Estado del Stream (mejorado con edición offline) -->
+
+    <!-- ========== STREAM STATUS CARD ========== -->
     <div class="card">
         <div class="card-header">
-            <i class="fas fa-broadcast"></i>
-            <h3>Estado del Stream</h3>
-            <span id="stream-status-badge" class="badge" style="background: var(--color-danger); margin-left: auto;">Offline</span>
+            <div class="card-header-left">
+                <i class="fas fa-tower-broadcast"></i>
+                <h3>Estado del Stream</h3>
+            </div>
+            <span id="stream-status-badge" class="badge stream-badge offline">
+                <span class="status-dot-small offline"></span> Offline
+            </span>
         </div>
         <div class="card-body">
+            <!-- Estado con punto y texto (sin emojis) -->
             <div class="status-indicator">
                 <span class="status-dot" id="stream-dot"></span>
                 <span id="stream-status-text">Cargando...</span>
             </div>
-            
-            <!-- Título del Stream - EDITABLE SIEMPRE -->
+
+            <!-- Título (editable) -->
             <div class="stream-edit-section">
-                <div class="info-item" style="align-items: flex-start;">
-                    <span class="label" style="padding-top: 8px;">Título:</span>
-                    <div style="flex: 1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                        <span class="value" id="stream-title" style="flex: 1; min-width: 150px;">-</span>
-                        <button onclick="editStreamTitle()" class="btn-icon btn-sm" title="Editar título" style="padding: 4px 8px;">
+                <div class="info-row">
+                    <span class="info-label"><i class="fas fa-heading"></i> Título</span>
+                    <div class="info-value-wrapper">
+                        <span class="info-value" id="stream-title">-</span>
+                        <button class="btn-icon btn-sm" onclick="editStreamTitle()" title="Editar título">
                             <i class="fas fa-pen"></i>
                         </button>
                     </div>
                 </div>
-                <div id="title-edit-container" style="display: none; margin: 8px 0 8px 88px;">
-                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                        <input type="text" id="title-input" class="form-control" style="flex: 1; min-width: 200px;" placeholder="Nuevo título del stream">
-                        <button onclick="saveStreamTitle()" class="btn-primary btn-sm">
-                            <i class="fas fa-check"></i> Guardar
-                        </button>
-                        <button onclick="cancelStreamTitle()" class="btn-secondary btn-sm">
-                            <i class="fas fa-times"></i> Cancelar
-                        </button>
+                <div id="title-edit-container" class="edit-container" style="display:none;">
+                    <input type="text" id="title-input" class="form-control" placeholder="Nuevo título">
+                    <div class="edit-actions">
+                        <button class="btn-primary btn-sm" onclick="saveStreamTitle()"><i class="fas fa-check"></i> Guardar</button>
+                        <button class="btn-secondary btn-sm" onclick="cancelStreamTitle()"><i class="fas fa-times"></i> Cancelar</button>
                     </div>
                 </div>
             </div>
 
-            <!-- Juego/Categoría - EDITABLE SIEMPRE -->
+            <!-- Juego (editable) -->
             <div class="stream-edit-section">
-                <div class="info-item" style="align-items: flex-start;">
-                    <span class="label" style="padding-top: 8px;">Juego:</span>
-                    <div style="flex: 1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                        <span class="value" id="stream-game" style="flex: 1; min-width: 150px;">-</span>
-                        <button onclick="editStreamGame()" class="btn-icon btn-sm" title="Cambiar juego" style="padding: 4px 8px;">
+                <div class="info-row">
+                    <span class="info-label"><i class="fas fa-gamepad"></i> Juego</span>
+                    <div class="info-value-wrapper">
+                        <span class="info-value" id="stream-game">-</span>
+                        <button class="btn-icon btn-sm" onclick="editStreamGame()" title="Cambiar juego">
                             <i class="fas fa-pen"></i>
                         </button>
                     </div>
                 </div>
-                <div id="game-edit-container" style="display: none; margin: 8px 0 8px 88px;">
-                    <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                        <input type="text" id="game-input" class="form-control" style="flex: 1; min-width: 200px;" placeholder="Nombre del juego o categoría">
-                        <button onclick="saveStreamGame()" class="btn-primary btn-sm">
-                            <i class="fas fa-check"></i> Guardar
-                        </button>
-                        <button onclick="cancelStreamGame()" class="btn-secondary btn-sm">
-                            <i class="fas fa-times"></i> Cancelar
-                        </button>
+                <div id="game-edit-container" class="edit-container" style="display:none;">
+                    <input type="text" id="game-input" class="form-control" placeholder="Nombre del juego">
+                    <div class="edit-actions">
+                        <button class="btn-primary btn-sm" onclick="saveStreamGame()"><i class="fas fa-check"></i> Guardar</button>
+                        <button class="btn-secondary btn-sm" onclick="cancelStreamGame()"><i class="fas fa-times"></i> Cancelar</button>
                     </div>
                 </div>
+                <!-- Espectadores centrado debajo del botón de editar juego -->
+                <div class="viewers-center">
+                    <span class="viewers-icon"><i class="fas fa-users"></i></span>
+                    <span class="viewers-number" id="stream-viewers">0</span>
+                    <span class="viewers-label">espectadores</span>
+                </div>
             </div>
 
-            <div class="info-item">
-                <span class="label">Espectadores:</span>
-                <span class="value" id="stream-viewers">0</span>
-            </div>
-            <div class="info-item">
-                <span class="label">Tiempo en vivo:</span>
-                <span class="value" id="stream-uptime">-</span>
+            <!-- Uptime -->
+            <div class="info-row" style="border-top:1px solid var(--border-color); padding-top:12px; margin-top:6px;">
+                <span class="info-label"><i class="fas fa-clock"></i> Tiempo en vivo</span>
+                <span class="info-value" id="stream-uptime">-</span>
             </div>
         </div>
     </div>
 
-    <!-- Estadísticas Rápidas -->
+    <!-- ========== STATISTICS CARD ========== -->
     <div class="card">
         <div class="card-header">
-            <i class="fas fa-chart-simple"></i>
-            <h3>Estadísticas</h3>
-            <a href="/stats" class="btn-icon btn-sm" style="margin-left: auto; padding: 2px 8px; font-size: 12px;" title="Ver estadísticas completas">
-                <i class="fas fa-arrow-right"></i>
-            </a>
-        </div>
-        <div class="card-body stats-grid" style="grid-template-columns: 1fr 1fr;">
-            <div class="stat-item">
-                <span class="stat-icon">👥</span>
-                <div>
-                    <span class="stat-value" id="stat-followers">0</span>
-                    <span class="stat-label">Seguidores</span>
-                </div>
+            <div class="card-header-left">
+                <i class="fas fa-chart-simple"></i>
+                <h3>Estadísticas</h3>
             </div>
-            <div class="stat-item">
-                <span class="stat-icon">💎</span>
-                <div>
-                    <span class="stat-value" id="stat-subscribers">0</span>
-                    <span class="stat-label">Suscriptores</span>
-                </div>
-            </div>
-            <div class="stat-item">
-                <span class="stat-icon">📝</span>
-                <div>
-                    <span class="stat-value" id="stat-commands">0</span>
-                    <span class="stat-label">Comandos</span>
-                </div>
-            </div>
-            <div class="stat-item">
-                <span class="stat-icon">🚫</span>
-                <div>
-                    <span class="stat-value" id="stat-banned">0</span>
-                    <span class="stat-label">Palabras Bloqueadas</span>
-                </div>
-            </div>
-            <div class="stat-item" style="grid-column: span 2; background: var(--bg-hover);">
-                <span class="stat-icon">👤</span>
-                <div>
-                    <span class="stat-value" id="stat-last-follower" style="font-size: 16px;">Esperando...</span>
-                    <span class="stat-label">Último seguidor</span>
-                </div>
-            </div>
-            <div class="stat-item" style="grid-column: span 2; background: var(--bg-hover);">
-                <span class="stat-icon">👑</span>
-                <div>
-                    <span class="stat-value" id="stat-last-subscriber" style="font-size: 16px;">Esperando...</span>
-                    <span class="stat-label">Último suscriptor</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Fila 2: Moderación y Spotify -->
-<div class="dashboard-grid">
-    <!-- Moderación Rápida -->
-    <div class="card">
-        <div class="card-header">
-            <i class="fas fa-shield-alt"></i>
-            <h3>Moderación</h3>
-            <a href="/moderation" class="btn-icon btn-sm" style="margin-left: auto; padding: 2px 8px; font-size: 12px;" title="Ir a moderación">
+            <a href="/stats" class="btn-icon btn-sm" title="Ver todas">
                 <i class="fas fa-arrow-right"></i>
             </a>
         </div>
         <div class="card-body">
-            <div class="stats-grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 12px;">
-                <div class="stat-item" style="flex-direction: column; text-align: center; padding: 8px;">
-                    <span class="stat-value" id="mod-timeouts" style="font-size: 28px;">0</span>
-                    <span class="stat-label">⏰ Timeouts</span>
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <span class="stat-icon"><i class="fas fa-user-friends"></i></span>
+                    <div>
+                        <span class="stat-value" id="stat-followers">0</span>
+                        <span class="stat-label">Seguidores</span>
+                    </div>
                 </div>
-                <div class="stat-item" style="flex-direction: column; text-align: center; padding: 8px;">
-                    <span class="stat-value" id="mod-banned" style="font-size: 28px;">0</span>
-                    <span class="stat-label">🔨 Baneados</span>
+                <div class="stat-item">
+                    <span class="stat-icon"><i class="fas fa-gem"></i></span>
+                    <div>
+                        <span class="stat-value" id="stat-subscribers">0</span>
+                        <span class="stat-label">Suscriptores</span>
+                    </div>
                 </div>
-                <div class="stat-item" style="flex-direction: column; text-align: center; padding: 8px;">
-                    <span class="stat-value" id="mod-warnings" style="font-size: 28px;">0</span>
-                    <span class="stat-label">⚠️ Advertencias</span>
+                <div class="stat-item">
+                    <span class="stat-icon"><i class="fas fa-terminal"></i></span>
+                    <div>
+                        <span class="stat-value" id="stat-commands">0</span>
+                        <span class="stat-label">Comandos</span>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon"><i class="fas fa-ban"></i></span>
+                    <div>
+                        <span class="stat-value" id="stat-banned">0</span>
+                        <span class="stat-label">Palabras bloqueadas</span>
+                    </div>
                 </div>
             </div>
-            <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted); text-align: center;">
-                Última actualización: <span id="mod-last-update">-</span>
-            </div>
-        </div>
-    </div>
 
-    <!-- Spotify Rápido (solo visual, sin botones) -->
-    <div class="card">
-        <div class="card-header">
-            <i class="fas fa-music"></i>
-            <h3>Spotify</h3>
-            <a href="/spotify" class="btn-icon btn-sm" style="margin-left: auto; padding: 2px 8px; font-size: 12px;" title="Ir a Spotify">
-                <i class="fas fa-arrow-right"></i>
-            </a>
-        </div>
-        <div class="card-body" id="spotify-preview">
-            <div style="display: flex; align-items: center; gap: 16px; padding: 8px 0;">
-                <!-- Disco giratorio -->
-                <div style="position: relative; flex-shrink: 0;">
-                    <div id="vinyl-container" style="width: 80px; height: 80px; border-radius: 50%; overflow: hidden; border: 2px solid var(--border-color); background: #1a1a2e; display: flex; align-items: center; justify-content: center; position: relative;">
-                        <img id="spotify-album-art" src="" alt="Album art" style="width: 100%; height: 100%; object-fit: cover; display: none;">
-                        <div id="vinyl-placeholder" style="width: 70px; height: 70px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #2a2a4a, #0a0a0f); display: flex; align-items: center; justify-content: center; font-size: 32px; color: var(--text-muted);">
-                            <i class="fas fa-music"></i>
-                        </div>
-                        <!-- Centro del disco -->
-                        <div style="position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--color-accent); border: 2px solid var(--bg-primary);"></div>
-                    </div>
-                    <!-- Indicador de reproducción en el disco -->
-                    <div id="vinyl-spinner" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 50%; border: 3px solid transparent; border-top-color: var(--color-accent); opacity: 0; transition: opacity 0.3s; pointer-events: none;"></div>
-                </div>
-                
-                <!-- Información de la canción -->
-                <div style="flex: 1; min-width: 0;">
-                    <div id="spotify-current-track" style="font-size: 16px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-</div>
-                    <div id="spotify-current-artist" style="font-size: 13px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">-</div>
-                    <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
-                        <span id="spotify-playing-indicator">⏸️ Pausado</span>
-                        <span style="margin-left: 12px;" id="spotify-queue-count">0</span> en cola
+            <!-- Último seguidor / suscriptor -->
+            <div class="extended-stats">
+                <div class="extended-stat">
+                    <span class="stat-icon"><i class="fas fa-user-plus"></i></span>
+                    <div>
+                        <span class="stat-value" id="stat-last-follower" style="font-size:16px;">Esperando...</span>
+                        <span class="stat-label">Último seguidor</span>
                     </div>
                 </div>
-            </div>
-            <!-- Barra de progreso visual simple -->
-            <div style="margin-top: 8px; height: 3px; background: var(--bg-hover); border-radius: 2px; overflow: hidden;">
-                <div id="spotify-progress-bar" style="height: 100%; width: 0%; background: var(--color-accent); border-radius: 2px; transition: width 0.5s;"></div>
+                <div class="extended-stat">
+                    <span class="stat-icon"><i class="fas fa-crown"></i></span>
+                    <div>
+                        <span class="stat-value" id="stat-last-subscriber" style="font-size:16px;">Esperando...</span>
+                        <span class="stat-label">Último suscriptor</span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
+<!-- ========== SECOND ROW ========== -->
+<div class="dashboard-grid">
+
+    <!-- ========== MODERATION CARD ========== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <i class="fas fa-shield"></i>
+                <h3>Moderación</h3>
+            </div>
+            <a href="/moderation" class="btn-icon btn-sm" title="Ir a moderación">
+                <i class="fas fa-arrow-right"></i>
+            </a>
+        </div>
+        <div class="card-body">
+            <div class="mod-stats">
+                <div class="mod-stat">
+                    <span class="mod-number" id="mod-timeouts">0</span>
+                    <span class="mod-label"><i class="fas fa-clock"></i> Timeouts</span>
+                </div>
+                <div class="mod-stat">
+                    <span class="mod-number" id="mod-banned">0</span>
+                    <span class="mod-label"><i class="fas fa-gavel"></i> Baneados</span>
+                </div>
+                <div class="mod-stat">
+                    <span class="mod-number" id="mod-warnings">0</span>
+                    <span class="mod-label"><i class="fas fa-exclamation-triangle"></i> Advertencias</span>
+                </div>
+            </div>
+            <div class="mod-footer">
+                <span><i class="fas fa-sync-alt fa-fw"></i> Última actualización: <span id="mod-last-update">-</span></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== SPOTIFY CARD (con disco circular) ========== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <i class="fas fa-music"></i>
+                <h3>Spotify</h3>
+            </div>
+            <a href="/spotify" class="btn-icon btn-sm" title="Ir a Spotify">
+                <i class="fas fa-arrow-right"></i>
+            </a>
+        </div>
+        <div class="card-body" id="spotify-preview">
+            <div class="spotify-mini">
+                <div class="spotify-artwork circular">
+                    <div id="vinyl-container">
+                        <img id="spotify-album-art" src="" alt="Album art" style="display:none;">
+                        <div id="vinyl-placeholder"><i class="fas fa-music"></i></div>
+                        <div id="vinyl-spinner"></div>
+                    </div>
+                </div>
+                <div class="spotify-info">
+                    <div class="track-name" id="spotify-current-track">-</div>
+                    <div class="track-artist" id="spotify-current-artist">-</div>
+                    <div class="track-meta">
+                        <span id="spotify-playing-indicator"><i class="fas fa-pause"></i> Pausado</span>
+                        <span id="spotify-queue-count">0</span> en cola
+                    </div>
+                </div>
+            </div>
+            <!-- Barra de progreso -->
+            <div class="progress-track">
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="spotify-progress-bar" style="width:0%;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================ -->
+<!-- STYLES (específicos de esta página)          -->
+<!-- ============================================ -->
 <style>
-.stream-edit-section {
-    margin: 4px 0;
-}
-
-.btn-secondary {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    background: var(--bg-input);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    font-size: 13px;
-    cursor: pointer;
-    transition: var(--transition);
-}
-
-.btn-secondary:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-
-.btn-icon.btn-sm {
-    padding: 4px 8px;
-    font-size: 12px;
-}
-
-#title-edit-container input,
-#game-edit-container input {
-    background: var(--bg-input);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    color: var(--text-primary);
-    padding: 6px 12px;
-    font-size: 14px;
-}
-
-#title-edit-container input:focus,
-#game-edit-container input:focus {
-    outline: none;
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
-}
-
-/* Animación de giro del disco */
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.vinyl-spinning #vinyl-container {
-    animation: spin 2s linear infinite;
-}
-
-.vinyl-spinning #vinyl-spinner {
-    opacity: 1;
-    animation: spin 1.5s linear infinite;
-}
-
-#vinyl-container {
-    transition: transform 0.3s ease;
-}
-
-@media (max-width: 768px) {
-    .stream-edit-section .info-item {
-        flex-direction: column;
-        align-items: stretch;
+    /* ---- Fuerza el color del icono del stream ---- */
+    .card-header-left i.fa-tower-broadcast {
+        color: var(--accent) !important;
     }
-    
-    .stream-edit-section .info-item .label {
-        padding-top: 4px;
+
+    /* ---- Badge de estado con punto ---- */
+    .stream-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 14px 4px 10px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        border: 1.5px solid transparent;
+        transition: all 0.3s ease;
+        background: transparent;
     }
-    
-    #title-edit-container,
-    #game-edit-container {
-        margin-left: 0 !important;
+    .stream-badge.online {
+        color: #22c55e;
+        border-color: #22c55e;
+        background: rgba(34, 197, 94, 0.08);
     }
-    
-    #title-edit-container > div,
-    #game-edit-container > div {
-        flex-direction: column;
-        width: 100%;
+    .stream-badge.offline {
+        color: #6b6b6b;
+        border-color: #6b6b6b;
+        background: rgba(107, 107, 107, 0.08);
     }
-    
-    #title-edit-container input,
-    #game-edit-container input {
-        width: 100%;
+    .status-dot-small {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+        transition: background 0.3s;
     }
-    
-    #spotify-preview > div {
-        flex-direction: column;
+    .status-dot-small.online {
+        background: #22c55e;
+    }
+    .status-dot-small.offline {
+        background: #6b6b6b;
+    }
+
+    /* ---- Punto grande del indicador ---- */
+    .status-indicator {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 0 16px 0;
+        font-size: 15px;
+        font-weight: 500;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 12px;
+    }
+    .status-indicator .status-dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+        transition: background 0.3s;
+    }
+    .status-indicator .status-dot.online {
+        background: #22c55e;
+        box-shadow: 0 0 12px rgba(34, 197, 94, 0.4);
+    }
+    .status-indicator .status-dot.offline {
+        background: #6b6b6b;
+        box-shadow: none;
+    }
+    #stream-status-text {
+        color: var(--text-primary);
+    }
+
+    /* ---- Stream edit ---- */
+    .stream-edit-section { margin-top: 12px; }
+    .info-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 0;
+        font-size: 14px;
+    }
+    .info-label {
+        color: var(--text-muted);
+        min-width: 80px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .info-label i {
+        color: var(--accent);
+        width: 18px;
         text-align: center;
     }
-    
-    #vinyl-container {
-        width: 60px !important;
-        height: 60px !important;
+    .info-value-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: 1;
+        justify-content: flex-end;
     }
-}
+    .info-value { color: var(--text-primary); }
+    .edit-container {
+        margin-top: 6px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .edit-container input { flex: 1; min-width: 150px; }
+    .edit-actions { display: flex; gap: 6px; }
+
+    /* ---- Espectadores centrados ---- */
+    .viewers-center {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        margin-top: 8px;
+        padding: 6px 0;
+        background: var(--bg-input);
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-color);
+    }
+    .viewers-icon {
+        color: var(--accent);
+        font-size: 16px;
+    }
+    .viewers-number {
+        font-size: 22px;
+        font-weight: 700;
+        color: var(--text-primary);
+    }
+    .viewers-label {
+        font-size: 13px;
+        color: var(--text-muted);
+        font-weight: 400;
+    }
+
+    /* ---- Stats grid ---- */
+    .stats-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 16px;
+    }
+    .stat-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--bg-input);
+        padding: 12px;
+        border-radius: 12px;
+        transition: var(--transition);
+    }
+    .stat-item:hover { background: var(--bg-hover); }
+    .stat-icon i {
+        font-size: 24px;
+        color: var(--accent);
+        width: 32px;
+        text-align: center;
+    }
+    .stat-value { display: block; font-size: 20px; font-weight: 700; color: var(--text-primary); }
+    .stat-label { display: block; font-size: 12px; color: var(--text-muted); }
+
+    .extended-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+    }
+    .extended-stat {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--bg-hover);
+        padding: 12px;
+        border-radius: 12px;
+    }
+    .extended-stat .stat-icon i {
+        font-size: 22px;
+        color: var(--accent);
+        width: 28px;
+        text-align: center;
+    }
+
+    /* ---- Moderation mini ---- */
+    .mod-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+    .mod-stat {
+        text-align: center;
+        background: var(--bg-input);
+        padding: 12px 8px;
+        border-radius: 12px;
+    }
+    .mod-number { display: block; font-size: 28px; font-weight: 700; color: var(--text-primary); }
+    .mod-label {
+        font-size: 12px;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+    }
+    .mod-label i {
+        color: var(--accent);
+        font-size: 13px;
+    }
+    .mod-footer {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+    .mod-footer i {
+        color: var(--accent);
+        margin-right: 4px;
+    }
+
+    /* ---- Spotify mini con disco circular ---- */
+    .spotify-mini {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+    .spotify-artwork {
+        flex-shrink: 0;
+        width: 72px;
+        height: 72px;
+        overflow: hidden;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        position: relative;
+        transition: border-color var(--transition);
+    }
+    .spotify-artwork.circular {
+        border-radius: 50%;
+    }
+    .spotify-artwork:hover {
+        border-color: var(--accent);
+    }
+    #vinyl-container {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+    #vinyl-container img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    #vinyl-placeholder {
+        font-size: 28px;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+    }
+    #vinyl-placeholder i {
+        font-size: 28px;
+        color: var(--text-muted);
+    }
+    #vinyl-spinner {
+        position: absolute;
+        inset: 0;
+        border: 3px solid transparent;
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+    }
+    .vinyl-spinning #vinyl-spinner {
+        opacity: 1;
+        animation: spin 1.5s linear infinite;
+    }
+    .vinyl-spinning #vinyl-container {
+        animation: spin 3s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .spotify-info { flex: 1; min-width: 0; }
+    .track-name {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-primary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .track-artist {
+        font-size: 13px;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .track-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 4px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+    .track-meta i {
+        color: var(--accent);
+        margin-right: 2px;
+    }
+    .progress-track { margin-top: 12px; }
+    .progress-bar-bg {
+        height: 4px;
+        background: var(--bg-hover);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        background: var(--accent);
+        border-radius: 4px;
+        transition: width 0.3s;
+    }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 768px) {
+        .stats-grid { grid-template-columns: 1fr 1fr; }
+        .extended-stats { grid-template-columns: 1fr; }
+        .mod-stats { grid-template-columns: 1fr 1fr; }
+        .spotify-mini { flex-direction: column; align-items: flex-start; }
+        .spotify-artwork {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 1/1;
+            max-width: 150px;
+        }
+        .info-row { flex-wrap: wrap; }
+        .info-value-wrapper { justify-content: flex-start; }
+        .edit-container { flex-direction: column; align-items: stretch; }
+        .viewers-center { padding: 4px 0; }
+        .viewers-number { font-size: 18px; }
+    }
+    @media (max-width: 480px) {
+        .stats-grid { grid-template-columns: 1fr; }
+        .mod-stats { grid-template-columns: 1fr; }
+        .stream-badge { font-size: 10px; padding: 2px 10px 2px 8px; }
+        .status-dot-small { width: 6px; height: 6px; }
+        .viewers-number { font-size: 16px; }
+        .viewers-label { font-size: 11px; }
+    }
 </style>
 
+<!-- ============================================ -->
+<!-- SCRIPTS (todo el comportamiento existente)  -->
+<!-- ============================================ -->
 <script>
 // ============================================
-// ESTADO PARA EDICIÓN
+// ESTADO GLOBAL
 // ============================================
-
 let currentTitle = '';
 let currentGame = '';
 let currentLive = false;
 let isEditingTitle = false;
 let isEditingGame = false;
-let spotifyPlaying = false;
 let spotifyProgress = 0;
 let spotifyDuration = 0;
 let progressInterval = null;
 
 // ============================================
-// FUNCIONES DE EDICIÓN DE TÍTULO (siempre permitidas)
+// EDICIÓN DE TÍTULO
 // ============================================
-
 function editStreamTitle() {
     isEditingTitle = true;
-    document.getElementById('title-edit-container').style.display = 'block';
+    document.getElementById('title-edit-container').style.display = 'flex';
     document.getElementById('title-input').value = currentTitle;
     document.getElementById('title-input').focus();
     document.getElementById('title-input').select();
 }
-
 function cancelStreamTitle() {
     isEditingTitle = false;
     document.getElementById('title-edit-container').style.display = 'none';
     document.getElementById('title-input').value = '';
 }
-
 async function saveStreamTitle() {
     const newTitle = document.getElementById('title-input').value.trim();
-    if (!newTitle) {
-        showToast('❌ El título no puede estar vacío', 'error');
-        return;
-    }
-    
-    if (newTitle === currentTitle) {
-        cancelStreamTitle();
-        return;
-    }
-    
+    if (!newTitle) { showToast('El título no puede estar vacío', 'error'); return; }
+    if (newTitle === currentTitle) { cancelStreamTitle(); return; }
     try {
-        const response = await fetch('/api/stream/title', {
+        const res = await fetch('/api/stream/title', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title: newTitle })
         });
-        const data = await response.json();
-        
+        const data = await res.json();
         if (data.success) {
-            showToast('✅ Título actualizado correctamente', 'success');
+            showToast('Título actualizado', 'success');
             currentTitle = newTitle;
             document.getElementById('stream-title').textContent = newTitle;
             cancelStreamTitle();
             dashboardAPI.refresh();
         } else {
-            showToast('❌ Error: ' + (data.error || 'No se pudo actualizar'), 'error');
+            showToast('Error: ' + (data.error || 'No se pudo actualizar'), 'error');
         }
-    } catch (error) {
-        showToast('❌ Error al actualizar título', 'error');
-    }
+    } catch { showToast('Error al actualizar título', 'error'); }
 }
 
 // ============================================
-// FUNCIONES DE EDICIÓN DE JUEGO (siempre permitidas)
+// EDICIÓN DE JUEGO
 // ============================================
-
 function editStreamGame() {
     isEditingGame = true;
-    document.getElementById('game-edit-container').style.display = 'block';
+    document.getElementById('game-edit-container').style.display = 'flex';
     document.getElementById('game-input').value = currentGame;
     document.getElementById('game-input').focus();
     document.getElementById('game-input').select();
 }
-
 function cancelStreamGame() {
     isEditingGame = false;
     document.getElementById('game-edit-container').style.display = 'none';
     document.getElementById('game-input').value = '';
 }
-
 async function saveStreamGame() {
     const newGame = document.getElementById('game-input').value.trim();
-    if (!newGame) {
-        showToast('❌ El nombre del juego no puede estar vacío', 'error');
-        return;
-    }
-    
-    if (newGame === currentGame) {
-        cancelStreamGame();
-        return;
-    }
-    
+    if (!newGame) { showToast('El nombre del juego no puede estar vacío', 'error'); return; }
+    if (newGame === currentGame) { cancelStreamGame(); return; }
     try {
-        const response = await fetch('/api/stream/game', {
+        const res = await fetch('/api/stream/game', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ game: newGame })
         });
-        const data = await response.json();
-        
+        const data = await res.json();
         if (data.success) {
-            showToast('✅ Juego actualizado correctamente', 'success');
+            showToast('Juego actualizado', 'success');
             currentGame = data.game_name || newGame;
             document.getElementById('stream-game').textContent = currentGame;
             cancelStreamGame();
             dashboardAPI.refresh();
         } else {
-            showToast('❌ Error: ' + (data.error || 'No se pudo actualizar'), 'error');
+            showToast('Error: ' + (data.error || 'No se pudo actualizar'), 'error');
         }
-    } catch (error) {
-        showToast('❌ Error al actualizar juego', 'error');
-    }
-}
-
-// ============================================
-// ACTUALIZAR DISCO DE SPOTIFY
-// ============================================
-
-function updateSpotifyDisc(track, isPlaying, progressMs, durationMs) {
-    const container = document.getElementById('vinyl-container');
-    const albumArt = document.getElementById('spotify-album-art');
-    const placeholder = document.getElementById('vinyl-placeholder');
-    const spinner = document.getElementById('vinyl-spinner');
-    
-    // Actualizar información
-    document.getElementById('spotify-current-track').textContent = track?.name || '-';
-    document.getElementById('spotify-current-artist').textContent = track?.artist || '-';
-    
-    const indicator = document.getElementById('spotify-playing-indicator');
-    const queueCount = document.getElementById('spotify-queue-count');
-    
-    // Actualizar imagen del disco
-    if (track?.album_art) {
-        albumArt.src = track.album_art;
-        albumArt.style.display = 'block';
-        placeholder.style.display = 'none';
-    } else {
-        albumArt.style.display = 'none';
-        placeholder.style.display = 'flex';
-    }
-    
-    // Estado de reproducción y animación
-    if (isPlaying) {
-        indicator.textContent = '▶️ Reproduciendo';
-        container.parentElement.classList.add('vinyl-spinning');
-        spinner.style.opacity = '1';
-        spotifyPlaying = true;
-    } else {
-        indicator.textContent = '⏸️ Pausado';
-        container.parentElement.classList.remove('vinyl-spinning');
-        spinner.style.opacity = '0';
-        spotifyPlaying = false;
-    }
-    
-    // Progreso
-    if (durationMs > 0) {
-        spotifyDuration = durationMs;
-        spotifyProgress = progressMs || 0;
-        updateProgressBar();
-        
-        // Actualizar barra de progreso cada segundo
-        if (progressInterval) clearInterval(progressInterval);
-        if (isPlaying) {
-            progressInterval = setInterval(() => {
-                spotifyProgress += 1000;
-                if (spotifyProgress > spotifyDuration) {
-                    spotifyProgress = 0;
-                }
-                updateProgressBar();
-            }, 1000);
-        }
-    }
-}
-
-function updateProgressBar() {
-    const percent = spotifyDuration > 0 ? (spotifyProgress / spotifyDuration) * 100 : 0;
-    document.getElementById('spotify-progress-bar').style.width = Math.min(percent, 100) + '%';
+    } catch { showToast('Error al actualizar juego', 'error'); }
 }
 
 // ============================================
 // ACTUALIZAR DASHBOARD DESDE DATOS
 // ============================================
-
 function updateDashboardFromData(data) {
-    // Estado del stream
+    // Stream
     currentLive = data.status?.live || false;
     currentTitle = data.status?.title || 'Sin título';
     currentGame = data.status?.game || 'No especificado';
-    
+
     const dot = document.getElementById('stream-dot');
     const statusText = document.getElementById('stream-status-text');
-    const statusBadge = document.getElementById('stream-status-badge');
-    
+    const badge = document.getElementById('stream-status-badge');
+
     if (currentLive) {
         dot.className = 'status-dot online';
-        statusText.textContent = ' En Vivo';
-        statusBadge.textContent = '🟢 EN VIVO';
-        statusBadge.style.background = 'var(--color-success)';
+        statusText.textContent = 'En Vivo';
+        badge.className = 'badge stream-badge online';
+        badge.innerHTML = '<span class="status-dot-small online"></span> En Vivo';
     } else {
         dot.className = 'status-dot offline';
-        statusText.textContent = ' Desconectado';
-        statusBadge.textContent = '🔴 Offline';
-        statusBadge.style.background = 'var(--color-danger)';
+        statusText.textContent = 'Desconectado';
+        badge.className = 'badge stream-badge offline';
+        badge.innerHTML = '<span class="status-dot-small offline"></span> Offline';
     }
-    
+
     document.getElementById('stream-title').textContent = currentTitle;
     document.getElementById('stream-game').textContent = currentGame;
     document.getElementById('stream-viewers').textContent = data.status?.viewers || 0;
     document.getElementById('stream-uptime').textContent = data.status?.uptime || '-';
-    
-    // Estadísticas
+
+    // Stats
     document.getElementById('stat-followers').textContent = data.stats?.followers || 0;
     document.getElementById('stat-subscribers').textContent = data.stats?.subscribers || 0;
     document.getElementById('stat-commands').textContent = data.stats?.commands || 0;
     document.getElementById('stat-banned').textContent = data.stats?.banned_words || 0;
-    
-    // Último seguidor y suscriptor
     document.getElementById('stat-last-follower').textContent = data.last_follower || 'Esperando...';
     document.getElementById('stat-last-subscriber').textContent = data.last_subscriber || 'Esperando...';
-    
-    // Moderación
+
+    // Moderation
     const timeouts = data.moderation?.timeouts?.length || 0;
     const botTimeouts = data.moderation?.bot_timeouts?.length || 0;
     const banned = data.moderation?.banned?.length || 0;
     const botBanned = data.moderation?.bot_banned?.length || 0;
     const warnings = data.moderation?.link_warnings?.length || 0;
-    
     document.getElementById('mod-timeouts').textContent = timeouts + botTimeouts;
     document.getElementById('mod-banned').textContent = banned + botBanned;
     document.getElementById('mod-warnings').textContent = warnings;
     document.getElementById('mod-last-update').textContent = new Date().toLocaleTimeString();
-    
-    // Spotify (con imagen de portada)
+
+    // Spotify
     const spotify = data.spotify || {};
     const currentTrack = spotify.current || {};
     const queue = spotify.queue || [];
-    
-    // Obtener portada del álbum
-    let albumArt = null;
-    if (currentTrack.url) {
-        // Intentar obtener portada desde Spotify
-        try {
-            const trackId = currentTrack.id;
-            if (trackId) {
-                // Usar la API de Spotify para obtener la portada (en el backend)
-                fetch(`/api/spotify/track-art/${trackId}`)
-                    .then(res => res.json())
-                    .then(artData => {
-                        if (artData.album_art) {
-                            updateSpotifyDisc(
-                                { ...currentTrack, album_art: artData.album_art },
-                                spotify.is_playing || false,
-                                spotify.progress_ms || 0,
-                                currentTrack.duration_ms || 0
-                            );
-                        }
-                    })
-                    .catch(() => {});
-            }
-        } catch (e) {}
-    }
-    
+    document.getElementById('spotify-current-track').textContent = currentTrack.name || '-';
+    document.getElementById('spotify-current-artist').textContent = currentTrack.artist || '-';
     document.getElementById('spotify-queue-count').textContent = queue.length;
-    
-    // Si no se pudo obtener portada, mostrar sin ella
-    if (!albumArt) {
-        updateSpotifyDisc(
-            currentTrack,
-            spotify.is_playing || false,
-            spotify.progress_ms || 0,
-            currentTrack.duration_ms || 0
-        );
+
+    const isPlaying = spotify.is_playing || false;
+    const indicator = document.getElementById('spotify-playing-indicator');
+    const container = document.getElementById('vinyl-container').parentElement;
+    if (isPlaying) {
+        indicator.innerHTML = '<i class="fas fa-play"></i> Reproduciendo';
+        container.classList.add('vinyl-spinning');
+    } else {
+        indicator.innerHTML = '<i class="fas fa-pause"></i> Pausado';
+        container.classList.remove('vinyl-spinning');
+    }
+
+    // Album art
+    const img = document.getElementById('spotify-album-art');
+    const placeholder = document.getElementById('vinyl-placeholder');
+    if (currentTrack.id) {
+        fetch(`/api/spotify/track-art/${currentTrack.id}`)
+            .then(res => res.json())
+            .then(art => {
+                if (art.album_art) {
+                    img.src = art.album_art;
+                    img.style.display = 'block';
+                    placeholder.style.display = 'none';
+                }
+            })
+            .catch(() => {});
+    } else {
+        img.style.display = 'none';
+        placeholder.style.display = 'flex';
+    }
+
+    // Progress
+    if (currentTrack.duration_ms) {
+        spotifyDuration = currentTrack.duration_ms;
+        spotifyProgress = spotify.progress_ms || 0;
+        updateProgressBar(spotifyProgress);
+        if (progressInterval) clearInterval(progressInterval);
+        if (isPlaying) {
+            progressInterval = setInterval(() => {
+                spotifyProgress += 1000;
+                if (spotifyProgress > spotifyDuration) spotifyProgress = 0;
+                updateProgressBar(spotifyProgress);
+            }, 1000);
+        }
     }
 }
 
-// ============================================
-// FALLBACK PARA DASHBOARD
-// ============================================
+function updateProgressBar(progress) {
+    const pct = spotifyDuration > 0 ? (progress / spotifyDuration) * 100 : 0;
+    document.getElementById('spotify-progress-bar').style.width = Math.min(pct, 100) + '%';
+}
 
+// ============================================
+// FALLBACK
+// ============================================
 function updateDashboardFallback() {
     fetch('/api/status')
         .then(res => res.json())
@@ -602,7 +791,6 @@ function updateDashboardFallback() {
             currentLive = data.live || false;
             currentTitle = data.title || 'Sin título';
             currentGame = data.game || 'No especificado';
-            
             document.getElementById('stream-title').textContent = currentTitle;
             document.getElementById('stream-game').textContent = currentGame;
             document.getElementById('stream-viewers').textContent = data.viewers || 0;
@@ -611,56 +799,41 @@ function updateDashboardFallback() {
             document.getElementById('stat-subscribers').textContent = data.subscribers || 0;
             document.getElementById('stat-commands').textContent = data.commands || 0;
             document.getElementById('stat-banned').textContent = data.banned_words || 0;
-            
-            // Último seguidor y suscriptor (fallback)
-            document.getElementById('stat-last-follower').textContent = 'Esperando...';
-            document.getElementById('stat-last-subscriber').textContent = 'Esperando...';
         })
         .catch(() => {});
 }
 
 // ============================================
-// FUNCIÓN PRINCIPAL DE ACTUALIZACIÓN
-// ============================================
-
-function updateDashboard() {
-    if (window.dashboardAPI && typeof window.dashboardAPI.getData === 'function') {
-        window.dashboardAPI.getData().then(data => {
-            updateDashboardFromData(data);
-        }).catch(() => {
-            updateDashboardFallback();
-        });
-    } else {
-        updateDashboardFallback();
-    }
-}
-
-// ============================================
 // INICIALIZACIÓN
 // ============================================
-
-document.addEventListener('DOMContentLoaded', function() {
-    updateDashboard();
-    
-    // Suscribirse a actualizaciones de la API
-    if (window.dashboardAPI && typeof window.dashboardAPI.subscribe === 'function') {
+function initDashboard() {
+    if (window.dashboardAPI && typeof window.dashboardAPI.getData === 'function') {
+        window.dashboardAPI.getData().then(data => updateDashboardFromData(data))
+            .catch(() => updateDashboardFallback());
         window.dashboardAPI.subscribe(updateDashboardFromData);
+    } else {
+        updateDashboardFallback();
+        setInterval(updateDashboardFallback, 30000);
     }
-    
-    // Tecla ESC para cancelar edición
-    document.addEventListener('keydown', function(e) {
+
+    // ESC para cancelar edición
+    document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
             if (isEditingTitle) cancelStreamTitle();
             if (isEditingGame) cancelStreamGame();
         }
     });
-    
-    // Limpiar intervalo al salir
-    window.addEventListener('beforeunload', function() {
+
+    // Cleanup
+    window.addEventListener('beforeunload', () => {
         if (progressInterval) clearInterval(progressInterval);
     });
-});
+}
 
-console.log('📊 Dashboard mejorado cargado correctamente');
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDashboard);
+} else {
+    initDashboard();
+}
 </script>
 {% endblock %}

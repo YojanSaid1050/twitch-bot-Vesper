@@ -1,32 +1,37 @@
 {% extends "base.html" %}
 
-{% block title %}VesperBot - Logs{% endblock %}
-{% block header %}Registro de Eventos (Logs){% endblock %}
+{% block title %}VesperBot — Logs{% endblock %}
+{% block header %}Registro de Eventos{% endblock %}
 
 {% block content %}
+
 <div class="card full-width">
     <div class="card-header">
-        <i class="fas fa-list-ul"></i>
-        <h3>Logs del Sistema</h3>
-        <div style="display: flex; gap: 10px; margin-left: auto; flex-wrap: wrap;">
+        <div class="card-header-left">
+            <i class="fas fa-list-ul"></i>
+            <h3>Logs del Sistema</h3>
+        </div>
+        <div class="logs-header-actions">
             <button onclick="clearLogs()" class="btn-danger btn-sm">
                 <i class="fas fa-trash"></i> Limpiar
             </button>
-            <button onclick="refreshLogs()" class="btn-primary btn-sm" style="color: #fff !important;">
-                <i class="fas fa-sync" style="color: #fff !important;"></i> Refrescar
+            <button onclick="refreshLogs()" class="btn-primary btn-sm">
+                <i class="fas fa-sync"></i> Refrescar
             </button>
-            <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary);">
-                Auto-refresh
+            <label class="toggle-check">
                 <input type="checkbox" id="auto-refresh-toggle" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-label"><i class="fas fa-sync-alt"></i> Auto</span>
             </label>
         </div>
     </div>
     <div class="card-body">
+
         <!-- Filtros -->
-        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
-            <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 120px;">
-                <label>Nivel</label>
-                <select id="filter-level" class="form-control" style="width: 100%;">
+        <div class="logs-filters">
+            <div class="filter-group">
+                <label><i class="fas fa-tag"></i> Nivel</label>
+                <select id="filter-level" class="form-control">
                     <option value="">Todos</option>
                     <option value="INFO">INFO</option>
                     <option value="WARNING">WARNING</option>
@@ -34,190 +39,534 @@
                     <option value="CRITICAL">CRITICAL</option>
                 </select>
             </div>
-            <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 120px;">
-                <label>Fuente</label>
-                <select id="filter-source" class="form-control" style="width: 100%;">
+            <div class="filter-group">
+                <label><i class="fas fa-code-branch"></i> Fuente</label>
+                <select id="filter-source" class="form-control">
                     <option value="">Todas</option>
                 </select>
             </div>
-            <div class="form-group" style="margin-bottom: 0; flex: 1; min-width: 100px;">
-                <label>Límite</label>
-                <select id="filter-limit" class="form-control" style="width: 100%;">
+            <div class="filter-group">
+                <label><i class="fas fa-sort-amount-down"></i> Límite</label>
+                <select id="filter-limit" class="form-control">
                     <option value="50">50</option>
                     <option value="100" selected>100</option>
                     <option value="200">200</option>
                     <option value="500">500</option>
                 </select>
             </div>
-            <div style="display: flex; align-items: flex-end;">
-                <button onclick="applyFilters()" class="btn-primary btn-sm" style="color: #fff !important;">
-                    <i class="fas fa-filter" style="color: #fff !important;"></i> Aplicar
+            <div class="filter-actions">
+                <button onclick="applyFilters()" class="btn-primary">
+                    <i class="fas fa-filter"></i> Aplicar
                 </button>
             </div>
         </div>
 
         <!-- Tabla de logs -->
-        <div class="table-wrapper" style="max-height: 500px; overflow-y: auto;">
+        <div class="table-wrapper logs-table">
             <table class="table" id="logs-table">
                 <thead>
                     <tr>
-                        <th style="width: 80px;">Nivel</th>
-                        <th style="width: 180px;">Timestamp</th>
-                        <th style="width: 150px;">Fuente</th>
+                        <th style="width:80px;">Nivel</th>
+                        <th style="width:180px;">Timestamp</th>
+                        <th style="width:140px;">Fuente</th>
                         <th>Mensaje</th>
                     </tr>
                 </thead>
                 <tbody id="logs-body">
                     <tr>
-                        <td colspan="4" class="text-center">Cargando logs...</td>
+                        <td colspan="4" class="text-center" style="color:var(--text-muted); padding:40px;">
+                            <i class="fas fa-spinner fa-spin" style="font-size:24px; display:block; margin-bottom:12px;"></i>
+                            Cargando logs...
+                        </td>
                     </tr>
                 </tbody>
             </table>
         </div>
-        <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted); text-align: right;">
-            Mostrando <span id="logs-count">0</span> registros
+
+        <div class="logs-footer">
+            <span><i class="fas fa-file-alt"></i> Mostrando <span id="logs-count">0</span> registros</span>
+            <span id="logs-auto-status" style="font-size:12px; color:var(--text-muted);">
+                <i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)
+            </span>
         </div>
     </div>
 </div>
 
+<!-- ============================================ -->
+<!-- STYLES (específicos de logs)                -->
+<!-- ============================================ -->
 <style>
-    .log-level-INFO td:first-child { color: #3b82f6; }
-    .log-level-WARNING td:first-child { color: #f59e0b; }
-    .log-level-ERROR td:first-child { color: #ef4444; }
-    .log-level-CRITICAL td:first-child { color: #dc2626; font-weight: bold; }
-    
-    /* Forzar color blanco en iconos de botones primary */
-    .btn-primary i {
-        color: #fff !important;
+    /* ---- Header actions ---- */
+    .logs-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
     }
-    .btn-primary:hover i {
-        color: #fff !important;
+
+    /* ---- Toggle switch personalizado ---- */
+    .toggle-check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+        padding-left: 44px;
+        min-height: 24px;
     }
-    .btn-primary:active i {
-        color: #fff !important;
+    .toggle-check input {
+        position: absolute;
+        opacity: 0;
+        cursor: pointer;
+        height: 0;
+        width: 0;
+    }
+    .toggle-check .toggle-slider {
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 24px;
+        width: 40px;
+        background-color: var(--bg-hover);
+        border-radius: 12px;
+        transition: var(--transition);
+        border: 1px solid var(--border-color);
+    }
+    .toggle-check .toggle-slider:before {
+        content: "";
+        position: absolute;
+        height: 18px;
+        width: 18px;
+        left: 2px;
+        bottom: 2px;
+        background-color: var(--text-muted);
+        border-radius: 50%;
+        transition: var(--transition);
+    }
+    .toggle-check input:checked + .toggle-slider {
+        background-color: var(--accent);
+        border-color: var(--accent);
+    }
+    .toggle-check input:checked + .toggle-slider:before {
+        transform: translateX(16px);
+        background-color: #fff;
+    }
+    .toggle-check .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 500;
+        font-size: 13px;
+        color: var(--text-secondary);
+    }
+    .toggle-check .toggle-label i {
+        color: var(--accent);
+        font-size: 12px;
+    }
+
+    /* ---- Filtros ---- */
+    .logs-filters {
+        display: grid;
+        grid-template-columns: 1fr 1fr 0.8fr auto;
+        gap: 16px;
+        margin-bottom: 20px;
+        align-items: flex-end;
+    }
+    .filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .filter-group label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .filter-group label i {
+        color: var(--accent);
+        font-size: 13px;
+    }
+    .filter-group .form-control {
+        padding: 8px 12px;
+        font-size: 13px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        transition: var(--transition);
+        outline: none;
+        font-family: var(--font-family);
+        width: 100%;
+    }
+    .filter-group .form-control:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    .filter-group .form-control option {
+        background: var(--bg-card);
+        color: var(--text-primary);
+    }
+    .filter-actions {
+        display: flex;
+        align-items: flex-end;
+        padding-bottom: 1px;
+    }
+    .filter-actions .btn-primary {
+        padding: 8px 18px;
+        font-size: 13px;
+        white-space: nowrap;
+    }
+
+    /* ---- Tabla ---- */
+    .logs-table {
+        max-height: 520px;
+        overflow-y: auto;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border-color);
+    }
+    .logs-table table {
+        margin-bottom: 0;
+    }
+    .logs-table thead {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--bg-secondary);
+    }
+    .logs-table thead th {
+        background: var(--bg-secondary);
+        border-bottom: 2px solid var(--border-color);
+    }
+
+    /* ---- Colores por nivel ---- */
+    .log-level-INFO td:first-child {
+        color: var(--info);
+        font-weight: 600;
+    }
+    .log-level-WARNING td:first-child {
+        color: var(--warning);
+        font-weight: 600;
+    }
+    .log-level-ERROR td:first-child {
+        color: var(--danger);
+        font-weight: 600;
+    }
+    .log-level-CRITICAL td:first-child {
+        color: var(--danger);
+        font-weight: 700;
+        text-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+    }
+    .log-level-CRITICAL {
+        background: rgba(239, 68, 68, 0.04);
+    }
+
+    /* ---- Footer ---- */
+    .logs-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 12px;
+        font-size: 13px;
+        color: var(--text-muted);
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .logs-footer i {
+        color: var(--accent);
+        margin-right: 4px;
+    }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 768px) {
+        .logs-filters {
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .filter-actions {
+            grid-column: 1 / -1;
+            justify-content: flex-end;
+        }
+        .logs-table thead th:nth-child(2),
+        .logs-table tbody td:nth-child(2) {
+            min-width: 140px;
+        }
+        .logs-table thead th:nth-child(3),
+        .logs-table tbody td:nth-child(3) {
+            min-width: 100px;
+        }
+        .toggle-check {
+            padding-left: 36px;
+            font-size: 12px;
+        }
+        .toggle-check .toggle-slider {
+            height: 20px;
+            width: 34px;
+        }
+        .toggle-check .toggle-slider:before {
+            height: 14px;
+            width: 14px;
+        }
+        .toggle-check input:checked + .toggle-slider:before {
+            transform: translateX(14px);
+        }
+        .logs-header-actions {
+            gap: 6px;
+        }
+        .logs-header-actions .btn-sm {
+            font-size: 11px;
+            padding: 4px 10px;
+        }
+    }
+    @media (max-width: 480px) {
+        .logs-filters {
+            grid-template-columns: 1fr;
+            gap: 10px;
+        }
+        .filter-actions {
+            justify-content: stretch;
+        }
+        .filter-actions .btn-primary {
+            width: 100%;
+            justify-content: center;
+        }
+        .logs-footer {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 4px;
+        }
+        .logs-table {
+            max-height: 400px;
+        }
+        .logs-table thead th {
+            font-size: 10px;
+            padding: 6px 8px;
+        }
+        .logs-table tbody td {
+            font-size: 12px;
+            padding: 6px 8px;
+        }
+        .logs-table thead th:nth-child(2) {
+            min-width: 120px;
+        }
+        .logs-table thead th:nth-child(3) {
+            min-width: 80px;
+        }
+        .toggle-check {
+            padding-left: 32px;
+            font-size: 11px;
+        }
+        .toggle-check .toggle-slider {
+            height: 18px;
+            width: 30px;
+        }
+        .toggle-check .toggle-slider:before {
+            height: 12px;
+            width: 12px;
+            left: 2px;
+            bottom: 2px;
+        }
+        .toggle-check input:checked + .toggle-slider:before {
+            transform: translateX(12px);
+        }
+        .logs-header-actions .btn-sm {
+            font-size: 10px;
+            padding: 3px 8px;
+        }
     }
 </style>
 
+<!-- ============================================ -->
+<!-- SCRIPTS (funcionalidad 100% preservada)     -->
+<!-- ============================================ -->
 <script>
-let refreshInterval = null;
-let isLoading = false;
+    let refreshInterval = null;
+    let isLoading = false;
 
-function loadSources() {
-    fetch('/api/logs?limit=1')
-        .then(res => res.json())
-        .then(data => {
-            const select = document.getElementById('filter-source');
-            const currentValue = select.value;
-            select.innerHTML = '<option value="">Todas</option>';
-            if (data.sources) {
-                data.sources.forEach(source => {
-                    const opt = document.createElement('option');
-                    opt.value = source;
-                    opt.textContent = source;
-                    select.appendChild(opt);
-                });
-            }
-            if (currentValue) select.value = currentValue;
-        })
-        .catch(() => {});
-}
-
-function applyFilters() {
-    const level = document.getElementById('filter-level').value;
-    const source = document.getElementById('filter-source').value;
-    const limit = document.getElementById('filter-limit').value;
-    loadLogs(level, source, limit);
-}
-
-function loadLogs(level, source, limit) {
-    if (isLoading) return;
-    isLoading = true;
-    let url = `/api/logs?limit=${limit || 100}`;
-    if (level) url += `&level=${level}`;
-    if (source) url += `&source=${source}`;
-
-    fetch(url)
-        .then(res => res.json())
-        .then(data => {
-            const tbody = document.getElementById('logs-body');
-            const count = document.getElementById('logs-count');
-            if (!data.logs || data.logs.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" class="text-center">No hay logs para mostrar</td></tr>';
-                count.textContent = '0';
-                return;
-            }
-            count.textContent = data.logs.length;
-            tbody.innerHTML = data.logs.map(log => `
-                <tr class="log-level-${log.level}">
-                    <td><strong>${log.level}</strong></td>
-                    <td style="font-size: 12px; color: var(--text-secondary);">${new Date(log.timestamp).toLocaleString()}</td>
-                    <td style="font-size: 12px; color: var(--text-secondary);">${log.source}</td>
-                    <td>${log.message}</td>
-                </tr>
-            `).join('');
-        })
-        .catch(err => {
-            console.error('Error cargando logs:', err);
-            document.getElementById('logs-body').innerHTML = '<tr><td colspan="4" class="text-center">❌ Error al cargar logs</td></tr>';
-        })
-        .finally(() => {
-            isLoading = false;
-        });
-}
-
-function refreshLogs() {
-    applyFilters();
-}
-
-async function clearLogs() {
-    const confirmed = await showModal(
-        '⚠️ Confirmar limpieza',
-        '¿Estás seguro de que quieres eliminar todos los logs? Esta acción no se puede deshacer.',
-        'Limpiar',
-        'Cancelar',
-        'danger'
-    );
-    
-    if (!confirmed) return;
-    
-    fetch('/api/logs/clear', { method: 'POST' })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                showToast('✅ Logs limpiados', 'success');
-                refreshLogs();
-            } else {
-                showToast('❌ Error: ' + data.error, 'error');
-            }
-        })
-        .catch(err => {
-            showToast('❌ Error al limpiar logs', 'error');
-        });
-}
-
-document.getElementById('filter-level').addEventListener('change', applyFilters);
-document.getElementById('filter-source').addEventListener('change', applyFilters);
-document.getElementById('filter-limit').addEventListener('change', applyFilters);
-
-document.getElementById('auto-refresh-toggle').addEventListener('change', function() {
-    if (this.checked) {
-        refreshInterval = setInterval(refreshLogs, 10000);
-    } else {
-        clearInterval(refreshInterval);
-        refreshInterval = null;
+    // ============================================
+    // CARGAR FUENTES (para el filtro)
+    // ============================================
+    function loadSources() {
+        fetch('/api/logs?limit=1')
+            .then(res => res.json())
+            .then(data => {
+                const select = document.getElementById('filter-source');
+                const currentValue = select.value;
+                select.innerHTML = '<option value="">Todas</option>';
+                if (data.sources) {
+                    data.sources.forEach(source => {
+                        const opt = document.createElement('option');
+                        opt.value = source;
+                        opt.textContent = source;
+                        select.appendChild(opt);
+                    });
+                }
+                if (currentValue) select.value = currentValue;
+            })
+            .catch(() => {});
     }
-});
 
-// Inicializar
-loadSources();
-applyFilters();
+    // ============================================
+    // APLICAR FILTROS Y CARGAR LOGS
+    // ============================================
+    function applyFilters() {
+        const level = document.getElementById('filter-level').value;
+        const source = document.getElementById('filter-source').value;
+        const limit = document.getElementById('filter-limit').value;
+        loadLogs(level, source, limit);
+    }
 
-// Auto-refresh cada 10 segundos por defecto
-refreshInterval = setInterval(refreshLogs, 10000);
+    function loadLogs(level, source, limit) {
+        if (isLoading) return;
+        isLoading = true;
 
-// Limpiar al salir
-window.addEventListener('beforeunload', function() {
-    if (refreshInterval) clearInterval(refreshInterval);
-});
+        let url = `/api/logs?limit=${limit || 100}`;
+        if (level) url += `&level=${level}`;
+        if (source) url += `&source=${source}`;
+
+        fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById('logs-body');
+                const count = document.getElementById('logs-count');
+
+                if (!data.logs || data.logs.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="text-center" style="color:var(--text-muted); padding:40px;">
+                                <i class="fas fa-inbox" style="font-size:24px; display:block; margin-bottom:8px; opacity:0.4;"></i>
+                                No hay logs para mostrar
+                            </td>
+                        </tr>
+                    `;
+                    count.textContent = '0';
+                    return;
+                }
+
+                count.textContent = data.logs.length;
+                tbody.innerHTML = data.logs.map(log => `
+                    <tr class="log-level-${log.level}">
+                        <td><strong>${log.level}</strong></td>
+                        <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">
+                            ${new Date(log.timestamp).toLocaleString()}
+                        </td>
+                        <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">
+                            ${log.source || 'unknown'}
+                        </td>
+                        <td style="word-break:break-word;">${log.message}</td>
+                    </tr>
+                `).join('');
+
+                // Actualizar estado del auto-refresh
+                const autoStatus = document.getElementById('logs-auto-status');
+                if (document.getElementById('auto-refresh-toggle').checked) {
+                    autoStatus.innerHTML = '<i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)';
+                } else {
+                    autoStatus.innerHTML = '<i class="fas fa-pause"></i> Auto-refresh desactivado';
+                }
+            })
+            .catch(err => {
+                console.error('Error cargando logs:', err);
+                document.getElementById('logs-body').innerHTML = `
+                    <tr>
+                        <td colspan="4" class="text-center" style="color:var(--danger); padding:40px;">
+                            <i class="fas fa-exclamation-triangle" style="font-size:24px; display:block; margin-bottom:8px;"></i>
+                            Error al cargar logs
+                        </td>
+                    </tr>
+                `;
+            })
+            .finally(() => {
+                isLoading = false;
+            });
+    }
+
+    // ============================================
+    // REFRESCAR
+    // ============================================
+    function refreshLogs() {
+        applyFilters();
+    }
+
+    // ============================================
+    // LIMPIAR LOGS
+    // ============================================
+    async function clearLogs() {
+        const confirmed = await showModal(
+            'Confirmar limpieza',
+            '¿Estás seguro de que quieres eliminar <strong>todos</strong> los logs? Esta acción no se puede deshacer.',
+            'Limpiar',
+            'Cancelar',
+            'danger'
+        );
+        if (!confirmed) return;
+
+        fetch('/api/logs/clear', { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Logs limpiados', 'success');
+                    refreshLogs();
+                } else {
+                    showToast('Error: ' + data.error, 'error');
+                }
+            })
+            .catch(() => {
+                showToast('Error al limpiar logs', 'error');
+            });
+    }
+
+    // ============================================
+    // AUTO-REFRESH
+    // ============================================
+    function toggleAutoRefresh(enable) {
+        if (refreshInterval) {
+            clearInterval(refreshInterval);
+            refreshInterval = null;
+        }
+        if (enable) {
+            refreshInterval = setInterval(refreshLogs, 10000);
+            document.getElementById('logs-auto-status').innerHTML = '<i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)';
+        } else {
+            document.getElementById('logs-auto-status').innerHTML = '<i class="fas fa-pause"></i> Auto-refresh desactivado';
+        }
+    }
+
+    document.getElementById('auto-refresh-toggle').addEventListener('change', function () {
+        toggleAutoRefresh(this.checked);
+    });
+
+    // ============================================
+    // EVENTOS DE FILTRO
+    // ============================================
+    document.getElementById('filter-level').addEventListener('change', applyFilters);
+    document.getElementById('filter-source').addEventListener('change', applyFilters);
+    document.getElementById('filter-limit').addEventListener('change', applyFilters);
+
+    // ============================================
+    // INICIALIZACIÓN
+    // ============================================
+    function initLogs() {
+        loadSources();
+        applyFilters();
+        toggleAutoRefresh(true);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initLogs);
+    } else {
+        initLogs();
+    }
+
+    window.addEventListener('beforeunload', function () {
+        if (refreshInterval) clearInterval(refreshInterval);
+    });
+
 </script>
+
 {% endblock %}

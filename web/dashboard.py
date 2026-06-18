@@ -1001,11 +1001,19 @@ def api_set_bot_icon():
         icon = data.get('icon', '').strip()
         if not icon:
             return jsonify({'success': False, 'error': 'El icono no puede estar vacío'}), 400
-        if len(icon) > 10:
+
+        # Permitir imágenes sin límite de longitud
+        if not icon.startswith('data:image') and len(icon) > 10:
             return jsonify({'success': False, 'error': 'El icono es demasiado largo'}), 400
+
         success = config_service.set('bot_icon', icon)
         if success:
-            log_service.add_log('info', f'Icono del bot actualizado a "{icon}"', 'dashboard')
+            # Truncar el icono si es una imagen Base64 para no saturar los logs
+            if icon.startswith('data:image'):
+                log_message = 'Icono del bot actualizado (imagen)'
+            else:
+                log_message = f'Icono del bot actualizado a "{icon}"'
+            log_service.add_log('info', log_message, 'dashboard')
             return jsonify({'success': True, 'message': 'Icono actualizado correctamente'})
         else:
             return jsonify({'success': False, 'error': 'Error al guardar el icono'}), 500

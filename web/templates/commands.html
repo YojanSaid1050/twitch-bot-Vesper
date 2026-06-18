@@ -1,188 +1,331 @@
 {% extends "base.html" %}
 
-{% block title %}VesperBot - Comandos{% endblock %}
+{% block title %}VesperBot — Comandos{% endblock %}
 {% block header %}Gestión de Comandos{% endblock %}
 
 {% block content %}
-<div class="card">
-    <div class="card-header">
-        <i class="fas fa-plus-circle"></i>
-        <h3>Crear Comando</h3>
-    </div>
-    <div class="card-body">
-        <form id="add-command-form" class="form-inline">
-            <div class="form-group">
-                <label>Nombre:</label>
-                <input type="text" id="cmd-name" placeholder="ej: reglas" class="form-control">
-            </div>
-            <div class="form-group">
-                <label>Respuesta:</label>
-                <input type="text" id="cmd-response" placeholder="Texto del comando" class="form-control">
-            </div>
-            <div class="form-group">
-                <label>Cooldown (s):</label>
-                <input type="number" id="cmd-cooldown" value="0" 
-                       style="width:80px; background: var(--bg-primary); border: 1px solid var(--border-color); 
-                              border-radius: 6px; color: var(--text-primary); padding: 4px 8px; font-size: 14px;
-                              -moz-appearance: textfield; appearance: textfield;">
-            </div>
-            <button type="submit" class="btn-primary">
-                <i class="fas fa-plus"></i> Crear
-            </button>
-        </form>
-    </div>
-</div>
 
-<div class="card">
-    <div class="card-header">
-        <i class="fas fa-list"></i>
-        <h3>Comandos Personalizados</h3>
-        <span class="badge" id="cmd-count">0</span>
-    </div>
-    <div class="card-body">
-        <div class="table-wrapper">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>Comando</th>
-                        <th>Respuesta</th>
-                        <th>Cooldown</th>
-                        <th>Creado</th>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody id="commands-list">
-                    <tr>
-                        <td colspan="5" class="text-center">Cargando comandos...</td>
-                    </tr>
-                </tbody>
-            </table>
+<div class="dashboard-grid">
+
+    <!-- ========== CREAR COMANDO ========== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <i class="fas fa-plus-circle"></i>
+                <h3>Crear Nuevo Comando</h3>
+            </div>
+        </div>
+        <div class="card-body">
+            <form id="add-command-form" class="form-inline">
+                <div class="form-group">
+                    <label><i class="fas fa-tag"></i> Nombre</label>
+                    <input type="text" id="cmd-name" class="form-control" placeholder="ej: reglas" required>
+                </div>
+                <div class="form-group" style="flex: 2;">
+                    <label><i class="fas fa-comment"></i> Respuesta</label>
+                    <input type="text" id="cmd-response" class="form-control" placeholder="Texto del comando" required>
+                </div>
+                <div class="form-group cooldown-group">
+                    <label><i class="fas fa-clock"></i> Cooldown (s)</label>
+                    <div class="cooldown-input-wrapper">
+                        <input type="number" id="cmd-cooldown" class="form-control" value="0" min="0" max="300">
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary" style="align-self: flex-end;">
+                    <i class="fas fa-plus"></i> Crear
+                </button>
+            </form>
+            <div id="cmd-form-message" style="margin-top:12px;"></div>
         </div>
     </div>
+
+    <!-- ========== LISTA DE COMANDOS ========== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <i class="fas fa-list"></i>
+                <h3>Comandos Personalizados</h3>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="badge" id="cmd-count">0</span>
+                <button onclick="loadCommands()" class="btn-icon btn-sm" title="Refrescar">
+                    <i class="fas fa-sync"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-wrapper">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th style="width: 20%;">Comando</th>
+                            <th style="width: 35%;">Respuesta</th>
+                            <th style="width: 12%;">Cooldown</th>
+                            <th style="width: 23%;">Creado</th>
+                            <th style="width: 10%;">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="commands-list">
+                        <tr>
+                            <td colspan="5" class="text-center">
+                                <span style="color: var(--text-muted);"><i class="fas fa-spinner fa-spin"></i> Cargando comandos...</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
 </div>
 
-<script>
-let autoReloadInterval;
-
-function loadCommands() {
-    fetch('/api/commands')
-        .then(res => {
-            if (!res.ok) throw new Error('Error en la respuesta');
-            return res.json();
-        })
-        .then(commands => {
-            console.log('📊 Comandos recibidos:', commands);
-            const tbody = document.getElementById('commands-list');
-            const count = document.getElementById('cmd-count');
-            
-            if (!commands || commands.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-center">No hay comandos personalizados</td></tr>';
-                count.textContent = '0';
-                return;
-            }
-            
-            count.textContent = commands.length;
-            tbody.innerHTML = commands.map(cmd => `
-                <tr>
-                    <td><strong>!${cmd.name}</strong></td>
-                    <td>${cmd.response.substring(0, 50)}${cmd.response.length > 50 ? '...' : ''}</td>
-                    <td>${cmd.cooldown}s</td>
-                    <td>${new Date(cmd.created_at).toLocaleString()}</td>
-                    <td>
-                        <button class="btn-danger btn-sm" onclick="deleteCommand('${cmd.name}')">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-            `).join('');
-        })
-        .catch(err => {
-            console.error('❌ Error cargando comandos:', err);
-            document.getElementById('commands-list').innerHTML = '<tr><td colspan="5" class="text-center">❌ Error cargando comandos</td></tr>';
-        });
-}
-
-async function deleteCommand(name) {
-    const confirmed = await showModal(
-        '⚠️ Confirmar eliminación',
-        `¿Estás seguro de eliminar el comando !${name}?`,
-        'Eliminar',
-        'Cancelar',
-        'danger'
-    );
-    
-    if (!confirmed) return;
-    
-    fetch(`/api/commands/${name}`, { method: 'DELETE' })
-        .then(res => res.json())
-        .then(data => {
-            if (data.error) {
-                showToast('❌ ' + data.error, 'error');
-            } else {
-                showToast('✅ ' + data.message, 'success');
-                loadCommands();
-            }
-        })
-        .catch(err => {
-            showToast('❌ Error al eliminar comando', 'error');
-            console.error(err);
-        });
-}
-
-document.getElementById('add-command-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    const name = document.getElementById('cmd-name').value.trim();
-    const response = document.getElementById('cmd-response').value.trim();
-    const cooldown = parseInt(document.getElementById('cmd-cooldown').value) || 0;
-    
-    if (!name || !response) {
-        showToast('❌ Nombre y respuesta son requeridos', 'error');
-        return;
+<!-- ============================================ -->
+<!-- STYLES (ajustes específicos)                -->
+<!-- ============================================ -->
+<style>
+    /* ---- Grupo de cooldown en una línea ---- */
+    .cooldown-group {
+        display: flex;
+        flex-direction: column;
+        flex: 0.6;
+        min-width: 120px;
     }
-    
-    const submitBtn = this.querySelector('button[type="submit"]');
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creando...';
-    
-    fetch('/api/commands', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, response, cooldown })
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.error) {
-            showToast('❌ ' + data.error, 'error');
-        } else {
-            showToast('✅ ' + data.message, 'success');
-            document.getElementById('cmd-name').value = '';
-            document.getElementById('cmd-response').value = '';
-            document.getElementById('cmd-cooldown').value = '0';
-            loadCommands();
+    .cooldown-group label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        margin-bottom: 4px;
+        white-space: nowrap;
+    }
+    .cooldown-group label i {
+        color: var(--accent);
+        font-size: 14px;
+    }
+    .cooldown-input-wrapper {
+        display: flex;
+        align-items: center;
+    }
+    .cooldown-input-wrapper input {
+        width: 100%;
+        padding: 10px 12px;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-size: 14px;
+        font-family: var(--font-family);
+        transition: var(--transition);
+        outline: none;
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+    .cooldown-input-wrapper input::-webkit-inner-spin-button,
+    .cooldown-input-wrapper input::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    .cooldown-input-wrapper input:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    /* ---- Responsive para móviles ---- */
+    @media (max-width: 768px) {
+        .cooldown-group {
+            flex: 1;
+            min-width: 100px;
         }
-    })
-    .catch(err => {
-        showToast('❌ Error al crear comando', 'error');
-        console.error(err);
-    })
-    .finally(() => {
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = '<i class="fas fa-plus"></i> Crear';
-    });
-});
-
-// Cargar inicialmente
-loadCommands();
-
-// Recargar automáticamente cada 5 segundos
-autoReloadInterval = setInterval(loadCommands, 5000);
-
-// Limpiar intervalo cuando se navega fuera
-window.addEventListener('beforeunload', function() {
-    if (autoReloadInterval) {
-        clearInterval(autoReloadInterval);
+        .form-inline {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .form-inline .form-group {
+            margin-bottom: 12px;
+        }
+        .form-inline .form-group:last-child {
+            margin-bottom: 0;
+        }
+        .cooldown-group label {
+            white-space: normal;
+        }
     }
-});
+    @media (max-width: 480px) {
+        .cooldown-group {
+            min-width: 80px;
+        }
+        .cooldown-input-wrapper input {
+            padding: 8px 10px;
+            font-size: 13px;
+        }
+    }
+</style>
+
+<!-- ============================================ -->
+<!-- SCRIPTS (funcionalidad 100% preservada)     -->
+<!-- ============================================ -->
+<script>
+    let autoReloadInterval = null;
+
+    // ============================================
+    // CARGAR COMANDOS
+    // ============================================
+    function loadCommands() {
+        fetch('/api/commands')
+            .then(res => {
+                if (!res.ok) throw new Error('Error en la respuesta');
+                return res.json();
+            })
+            .then(commands => {
+                const tbody = document.getElementById('commands-list');
+                const count = document.getElementById('cmd-count');
+
+                if (!commands || commands.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="5" class="text-center" style="color: var(--text-muted); padding: 24px;">
+                                <i class="fas fa-inbox" style="font-size: 24px; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
+                                No hay comandos personalizados
+                            </td>
+                        </tr>
+                    `;
+                    count.textContent = '0';
+                    return;
+                }
+
+                count.textContent = commands.length;
+                tbody.innerHTML = commands.map(cmd => `
+                    <tr>
+                        <td><strong style="color: var(--accent);">!${cmd.name}</strong></td>
+                        <td style="color: var(--text-secondary);">
+                            ${cmd.response.length > 60 ? cmd.response.substring(0, 60) + '…' : cmd.response}
+                        </td>
+                        <td style="color: var(--text-muted);">${cmd.cooldown}s</td>
+                        <td style="color: var(--text-muted); font-size: 13px;">
+                            ${cmd.created_at ? new Date(cmd.created_at).toLocaleString() : '—'}
+                        </td>
+                        <td>
+                            <button class="btn-danger btn-sm" onclick="deleteCommand('${cmd.name}')" title="Eliminar comando">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            })
+            .catch(err => {
+                console.error('Error cargando comandos:', err);
+                document.getElementById('commands-list').innerHTML = `
+                    <tr>
+                        <td colspan="5" class="text-center" style="color: var(--danger); padding: 24px;">
+                            <i class="fas fa-exclamation-triangle"></i> Error al cargar comandos
+                        </td>
+                    </tr>
+                `;
+            });
+    }
+
+    // ============================================
+    // ELIMINAR COMANDO
+    // ============================================
+    async function deleteCommand(name) {
+        const confirmed = await showModal(
+            '⚠️ Confirmar eliminación',
+            `¿Estás seguro de eliminar el comando <strong>!${name}</strong>? Esta acción no se puede deshacer.`,
+            'Eliminar',
+            'Cancelar',
+            'danger'
+        );
+
+        if (!confirmed) return;
+
+        fetch(`/api/commands/${name}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else {
+                    showToast(data.message, 'success');
+                    loadCommands();
+                }
+            })
+            .catch(() => {
+                showToast('Error al eliminar comando', 'error');
+            });
+    }
+
+    // ============================================
+    // CREAR COMANDO (formulario)
+    // ============================================
+    document.getElementById('add-command-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        const name = document.getElementById('cmd-name').value.trim();
+        const response = document.getElementById('cmd-response').value.trim();
+        const cooldown = parseInt(document.getElementById('cmd-cooldown').value) || 0;
+
+        if (!name || !response) {
+            showToast('Nombre y respuesta son requeridos', 'error');
+            return;
+        }
+
+        const submitBtn = this.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creando...';
+
+        fetch('/api/commands', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, response, cooldown })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else {
+                    showToast(data.message, 'success');
+                    document.getElementById('cmd-name').value = '';
+                    document.getElementById('cmd-response').value = '';
+                    document.getElementById('cmd-cooldown').value = '0';
+                    loadCommands();
+                }
+            })
+            .catch(() => {
+                showToast('Error al crear comando', 'error');
+            })
+            .finally(() => {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-plus"></i> Crear';
+            });
+    });
+
+    // ============================================
+    // AUTO-REFRESH
+    // ============================================
+    function startAutoRefresh() {
+        if (autoReloadInterval) clearInterval(autoReloadInterval);
+        autoReloadInterval = setInterval(loadCommands, 5000);
+    }
+
+    function stopAutoRefresh() {
+        if (autoReloadInterval) {
+            clearInterval(autoReloadInterval);
+            autoReloadInterval = null;
+        }
+    }
+
+    // ============================================
+    // INICIALIZACIÓN
+    // ============================================
+    document.addEventListener('DOMContentLoaded', function () {
+        loadCommands();
+        startAutoRefresh();
+
+        window.addEventListener('beforeunload', stopAutoRefresh);
+    });
+
+    window.addEventListener('pagehide', stopAutoRefresh);
 </script>
+
 {% endblock %}
