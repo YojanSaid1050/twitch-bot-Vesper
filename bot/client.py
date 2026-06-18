@@ -18,10 +18,14 @@ from services.log_service import log_service
 logger = get_logger(__name__)
 chat_settings = ChatSettings()
 
+
 class Bot(commands.Bot):
 
     def __init__(self):
-        logger.info("🕯️ Inicializando el relicario...")
+        # ===== SEPARADOR =====
+        logger.info("=" * 50)
+        logger.info("🕯️ INICIALIZANDO RELICARIO")
+        logger.info("=" * 50)
         log_service.add_log('info', 'Inicializando el relicario...', 'bot')
 
         token_manager.start_auto_refresh()
@@ -134,8 +138,6 @@ class Bot(commands.Bot):
             eventsub_service.set_bot(self)
             notification_service.set_bot(self)
 
-            # ELIMINADA: eventsub_service.start_webhook_server()
-
             if settings.EVENTSUB_CALLBACK_URL and settings.TWITCH_WEBHOOK_SECRET:
                 eventsub_service.subscribe_to_events()
                 logger.info("✅ EventSub configurado")
@@ -165,9 +167,16 @@ class Bot(commands.Bot):
             log_service.add_log('error', f'Error iniciando polling de follows: {e}', 'bot')
 
     async def event_ready(self):
+        # ===== SEPARADOR =====
+        logger.info("=" * 50)
+        logger.info("🔮 CONECTADO AL CANAL")
+        logger.info("=" * 50)
         await self.event_handler.on_ready()
         await self.start_follow_polling()
         await self.apply_chat_settings()
+        logger.info("=" * 50)
+        logger.info("✅ RELICARIO LISTO PARA SERVIR")
+        logger.info("=" * 50)
 
     async def event_message(self, message):
         await self.event_handler.on_message(message)

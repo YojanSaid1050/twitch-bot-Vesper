@@ -24,7 +24,6 @@ logger = setup_logger()
 
 
 def signal_handler(sig, frame):
-    """Manejar señales de cierre (Ctrl+C)"""
     logger.info("🛑 Recibida señal de cierre...")
     log_service.add_log('info', 'Señal de cierre recibida (Ctrl+C)', 'main')
     try:
@@ -35,15 +34,11 @@ def signal_handler(sig, frame):
 
 
 def start_dashboard():
-    """Iniciar el dashboard después de que el bot esté listo y los tokens sean válidos"""
     max_wait = 60
     waited = 0
-    
-    # Esperar a que el bot esté inicializado
     while not hasattr(sys.modules['__main__'], 'bot_instance') and waited < max_wait:
         time.sleep(1)
         waited += 1
-    
     if waited >= max_wait:
         logger.warning("⚠️ Dashboard iniciado sin esperar al bot (timeout)")
         log_service.add_log('warning', 'Dashboard iniciado sin esperar al bot (timeout)', 'main')
@@ -52,7 +47,6 @@ def start_dashboard():
         wait_for_tokens(timeout=60)
         logger.info("🚀 Iniciando dashboard...")
         log_service.add_log('info', 'Bot listo, iniciando dashboard', 'main')
-    
     try:
         run_dashboard()
     except Exception as e:
@@ -61,41 +55,49 @@ def start_dashboard():
 
 
 def main():
-    """Punto de entrada principal"""
     global bot_instance
-    
-    # Configurar manejadores de señales
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # BANNER INICIAL
+    print("\n" + "=" * 60)
+    print("🕯️  VESPERBOT - RELICARIO DEL VACÍO")
+    print("=" * 60)
+    print("🐍 Iniciando el ritual...")
+    print("=" * 60 + "\n")
 
     logger.info("🕯️ Iniciando VesperBot...")
     log_service.add_log('info', 'Iniciando VesperBot...', 'main')
 
-    # ===== CREAR Y CONFIGURAR EL EVENT LOOP DE MANERA SEGURA =====
+    # Crear event loop
     try:
-        # Intentar obtener el loop actual (si existe)
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        # No hay loop corriendo, crear uno nuevo y establecerlo
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         logger.info("✅ Event loop creado y establecido para el hilo principal")
         log_service.add_log('info', 'Event loop creado para el hilo principal', 'main')
-    
-    # Iniciar dashboard en hilo separado
+
+    logger.info(f"📡 Canal: {config_service.get('CHANNEL', 'No configurado')}")
+    logger.info(f"🤖 Bot: {config_service.get('BOT_NICK', 'No configurado')}")
+
     dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
     dashboard_thread.start()
 
     try:
-        # Crear y ejecutar el bot
         bot = Bot()
         bot_instance = bot
         set_bot_instance(bot)
         log_service.add_log('info', 'Bot creado y registrado en el dashboard', 'main')
-        
-        # Ejecutar el bot (bloquea hasta que termine)
+
+        # SEPARADOR ANTES DE CONEXIÓN
+        logger.info("=" * 60)
+        logger.info("🔮 Conectando al canal de Twitch...")
+        logger.info("=" * 60)
+
         bot.run()
-        
+
     except KeyboardInterrupt:
         logger.info("⏹️ Bot detenido por el usuario")
         log_service.add_log('info', 'Bot detenido por el usuario', 'main')
@@ -108,6 +110,10 @@ def main():
             token_manager.stop_auto_refresh()
         except:
             pass
+
+        print("\n" + "=" * 60)
+        print("🕯️  El relicario se ha apagado...")
+        print("=" * 60 + "\n")
 
 
 if __name__ == "__main__":

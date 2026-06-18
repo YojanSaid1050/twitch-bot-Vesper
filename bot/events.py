@@ -47,7 +47,9 @@ class EventHandler:
         if message.echo:
             return
 
-        logger.info(f"{message.author.name}: {message.content}")
+        # No mostramos cada mensaje en consola para evitar ruido, solo los relevantes (comandos, spam, etc.)
+        # Si quieres ver todos los mensajes, descomenta la siguiente línea:
+        # logger.info(f"{message.author.name}: {message.content}")
 
         # Verificar si es staff (mod o broadcaster)
         is_staff = permission_checker.is_staff(message)
@@ -63,7 +65,7 @@ class EventHandler:
             )
 
             if is_spam:
-                logger.warning(f"Spam detectado de {message.author.name}: {reason}")
+                logger.warning(f"🚫 Spam detectado de {message.author.name}: {reason}")
                 log_service.add_log('warning', f'Spam detectado de {message.author.name}: {reason}', 'anti_spam')
                 
                 # Siempre eliminar el mensaje
@@ -129,38 +131,28 @@ class EventHandler:
 
             if link_result:
                 action, reason, blocked_links = link_result
-                # Obtener conteo de advertencias por enlaces
                 count = warning_manager.get_warning_count(message.author.id, 'link')
                 max_w = warning_manager.get_max_warnings()
 
-                # ============================================
-                # SIEMPRE ELIMINAR EL MENSAJE (usando API directa)
-                # ============================================
+                # Siempre eliminar el mensaje
                 try:
                     success = await mod_actions.delete_message(message.id)
                     if success:
                         logger.info(f"🗑️ Mensaje eliminado de {message.author.name}: {message.content[:50]}...")
                     else:
-                        logger.warning(f"⚠️ No se pudo eliminar el mensaje de {message.author.name} (posible falta de permisos)")
-                        log_service.add_log('warning', f'No se pudo eliminar mensaje de {message.author.name} (falta de permisos)', 'moderation')
+                        logger.warning(f"⚠️ No se pudo eliminar el mensaje de {message.author.name}")
                         try:
                             await message.delete()
-                            logger.info(f"🗑️ Mensaje eliminado (fallback) de {message.author.name}")
                         except Exception as e:
                             logger.error(f"Fallback también falló: {e}")
                 except Exception as e:
                     logger.error(f"Error eliminando mensaje: {e}")
-                    log_service.add_log('error', f'Error eliminando mensaje de {message.author.name}: {e}', 'moderation')
                     try:
                         await message.delete()
-                        logger.info(f"🗑️ Mensaje eliminado (último recurso) de {message.author.name}")
                     except Exception as e2:
                         logger.error(f"Todos los intentos de eliminar mensaje fallaron: {e2}")
-                        log_service.add_log('error', f'Todos los intentos de eliminar mensaje de {message.author.name} fallaron', 'moderation')
 
-                # ============================================
-                # ACCIÓN SEGÚN ADVERTENCIA
-                # ============================================
+                # Acción según advertencia
                 if action == 'warning':
                     remaining = max_w - count
                     await message.channel.send(
@@ -182,7 +174,6 @@ class EventHandler:
                         log_service.add_log('info', f'Timeout a {message.author.name} por enlaces prohibidos', 'moderation')
                     except Exception as e:
                         logger.error(f"Error aplicando timeout: {e}")
-                        log_service.add_log('error', f'Error aplicando timeout a {message.author.name}: {e}', 'moderation')
                         await message.channel.send(f"⚠️ Error al silenciar a {message.author.name}")
 
                 elif action == 'ban':
@@ -196,7 +187,6 @@ class EventHandler:
                         log_service.add_log('info', f'Ban a {message.author.name} por enlaces prohibidos', 'moderation')
                     except Exception as e:
                         logger.error(f"Error aplicando ban: {e}")
-                        log_service.add_log('error', f'Error aplicando ban a {message.author.name}: {e}', 'moderation')
                         await message.channel.send(f"⚠️ Error al desterrar a {message.author.name}")
 
         # Procesar comandos
@@ -205,7 +195,6 @@ class EventHandler:
     async def on_command_error(self, context, error):
         from exceptions import PermissionDeniedError, TwitchAPIError, ValidationError
 
-        # IGNORAR COMANDOS INEXISTENTES
         if isinstance(error, twitch_commands.CommandNotFound):
             return
 
@@ -223,29 +212,36 @@ class EventHandler:
             error_msg = f"❌ El vacío no responde: {str(error)[:100]}"
             log_service.add_log('error', f'API Error en comando !{command_name}: {error}', 'twitch_api')
         else:
-            # Error no manejado específicamente, solo log y no se envía al chat
             logger.error(f"Error no manejado en comando '{command_name}': {error}")
             log_service.add_log('error', f'Error no manejado en comando !{command_name}: {error}', 'bot_commands')
 
         if error_msg and context.channel:
             await context.reply(error_msg)
 
+    # Eventos de notificación (follows, subs, raids) – ya tienen su propia lógica en notification_service
+    # Aquí solo los redirigimos, pero podemos añadir logs más claros.
     async def event_follow(self, channel, user):
+        logger.info(f"⭐ Nuevo follow de {user.name}")
         await notification_service.on_follow(channel, user)
 
     async def event_subscription(self, channel, user, sub_type, sub_plan, months=None):
+        logger.info(f"🎉 Nueva suscripción de {user.name} - {sub_plan}")
         await notification_service.on_subscribe(channel, user, sub_plan, sub_type)
 
     async def event_raid(self, channel, user, viewers):
+        logger.info(f"⚔️ Raid entrante de {user.name} con {viewers} espectadores")
         await notification_service.on_raid(channel, user, viewers)
 
     async def event_raid_go(self, channel, target, viewers):
+        logger.info(f"⚔️ Raid saliente a {target} con {viewers} espectadores")
         await notification_service.on_raid_go(channel, target, viewers)
 
     async def event_host(self, channel, user, viewers):
+        logger.info(f"🏠 Host de {user.name} con {viewers} espectadores")
         await notification_service.on_host(channel, user, viewers)
 
     async def on_user_join(self, channel, user):
+        # Opcional: log de usuarios que se unen (puede ser muy ruidoso)
         pass
 
     async def on_subscription(self, channel, user, sub_type, sub_plan):

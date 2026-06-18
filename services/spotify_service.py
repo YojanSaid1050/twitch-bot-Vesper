@@ -10,6 +10,7 @@ import threading
 import time
 import requests.exceptions
 import os
+from datetime import datetime, timedelta
 
 from config import settings
 from utils.logger import get_logger
@@ -36,6 +37,10 @@ class SpotifyService:
         self._last_error_time = 0
         self._error_cooldown = 30
         
+        # Estado del token para integración con token_manager
+        self.token_valid = False
+        self.token_expires_at = None
+        
         if self.client_id and self.client_secret:
             self._authenticate()
             self._start_monitoring()
@@ -46,7 +51,6 @@ class SpotifyService:
     def _authenticate(self):
         """Autenticar con Spotify usando refresh token desde variables de entorno"""
         try:
-            # Obtener refresh token desde variables de entorno
             refresh_token = os.getenv('SPOTIFY_REFRESH_TOKEN', '')
             
             if not refresh_token:
@@ -54,61 +58,101 @@ class SpotifyService:
                 logger.warning("💡 Agrega SPOTIFY_REFRESH_TOKEN a las variables de entorno de Render")
                 log_service.add_log('warning', 'No hay SPOTIFY_REFRESH_TOKEN configurado', 'spotify_service')
                 self.sp = None
+                self.token_valid = False
                 return
             
-            # Crear auth manager sin caché, solo para usar el refresh token
+            # Crear auth manager sin caché
             auth_manager = SpotifyOAuth(
                 client_id=self.client_id,
                 client_secret=self.client_secret,
                 redirect_uri=self.redirect_uri,
                 scope=self.scope,
-                cache_path=None,  # No usar caché en disco
+                cache_path=None,
                 open_browser=False,
                 show_dialog=False
             )
             
-            # Intentar obtener un nuevo access token usando el refresh token
             logger.info("🔄 Generando nuevo access token de Spotify desde refresh token...")
             
             try:
-                # Método directo para refrescar el token
                 token_info = auth_manager.refresh_access_token(refresh_token)
                 
                 if token_info and token_info.get('access_token'):
-                    # Crear el cliente con el token fresco
                     self.sp = spotipy.Spotify(auth_manager=auth_manager)
-                    # Forzar el token en el auth_manager
                     auth_manager.token_info = token_info
                     
+                    # Guardar información del token
+                    self.token_valid = True
+                    expires_in = token_info.get('expires_in', 3600)
+                    self.token_expires_at = datetime.now() + timedelta(seconds=expires_in)
+                    
                     logger.info("✅ Token de Spotify generado correctamente")
-                    log_service.add_log('info', 'Token de Spotify generado desde refresh token', 'spotify_service')
+                    logger.info(f"⏰ Expira en: {expires_in // 60} minutos")
+                    log_service.add_log('info', f'Token de Spotify generado desde refresh token (expira en {expires_in//60}m)', 'spotify_service')
                     
                     # Verificar que funciona
                     try:
-                        self.sp.current_user()
-                        logger.info("✅ Autenticación con Spotify verificada correctamente")
+                        user = self.sp.current_user()
+                        logger.info(f"👤 Conectado como: {user.get('display_name', 'Usuario Spotify')}")
                     except Exception as e:
-                        logger.warning(f"⚠️ Verificación falló, pero el token puede funcionar: {e}")
+                        logger.warning(f"⚠️ Verificación falló: {e}")
                 else:
                     logger.error("❌ No se pudo generar token de Spotify con el refresh token")
                     log_service.add_log('error', 'No se pudo generar token de Spotify con refresh token', 'spotify_service')
                     self.sp = None
+                    self.token_valid = False
                     
             except Exception as e:
                 error_msg = str(e)
                 if "invalid refresh token" in error_msg.lower():
                     logger.error("❌ Refresh token inválido o expirado. Genera uno nuevo localmente.")
-                    logger.error("💡 Ejecuta en local: python generate_spotify_token.py")
+                    logger.error("💡 Ejecuta en local el script para generar SPOTIFY_REFRESH_TOKEN")
                     log_service.add_log('error', 'Refresh token de Spotify inválido', 'spotify_service')
                 else:
                     logger.error(f"❌ Error generando token de Spotify: {e}")
                     log_service.add_log('error', f'Error generando token de Spotify: {e}', 'spotify_service')
                 self.sp = None
+                self.token_valid = False
                 
         except Exception as e:
             logger.error(f"❌ Error autenticando con Spotify: {e}")
             log_service.add_log('error', f'Error autenticando con Spotify: {e}', 'spotify_service')
             self.sp = None
+            self.token_valid = False
+    
+    def get_token_status(self) -> Dict:
+        """Obtener estado del token de Spotify para integración con token_manager"""
+        if not self.sp:
+            return {'valid': False, 'expires_at': None, 'expires_in': None}
+        
+        if self.token_expires_at:
+            now = datetime.now()
+            if self.token_expires_at > now:
+                expires_in = (self.token_expires_at - now).total_seconds()
+                return {
+                    'valid': True,
+                    'expires_at': self.token_expires_at,
+                    'expires_in': expires_in
+                }
+            else:
+                # Token expirado, intentar refrescar
+                logger.info("🔄 Token de Spotify expirado, refrescando...")
+                self._authenticate()
+                if self.token_expires_at:
+                    expires_in = (self.token_expires_at - datetime.now()).total_seconds()
+                    return {
+                        'valid': self.token_valid,
+                        'expires_at': self.token_expires_at,
+                        'expires_in': expires_in if expires_in > 0 else 0
+                    }
+        
+        return {'valid': self.token_valid, 'expires_at': None, 'expires_in': None}
+    
+    def refresh_token(self) -> bool:
+        """Refrescar token de Spotify manualmente (usado por token_manager)"""
+        logger.info("🔄 Refrescando token de Spotify...")
+        self._authenticate()
+        return self.token_valid
     
     def _start_monitoring(self):
         """Iniciar monitoreo de reproducción en segundo plano"""
@@ -141,8 +185,7 @@ class SpotifyService:
                     error_msg = str(e)
                     now = time.time()
                     if "EOF" in error_msg or "Server listening" in error_msg:
-                        # Estos errores son esperados en Render, solo log como debug
-                        if now - self._last_error_time > 300:  # Cada 5 minutos
+                        if now - self._last_error_time > 300:
                             logger.debug(f"Spotify en modo espera: {error_msg[:50]}")
                             self._last_error_time = now
                         time.sleep(10)
@@ -332,16 +375,13 @@ class SpotifyService:
         return (position != -1, position)
     
     def add_to_queue(self, track_id: str, track_info: dict) -> bool:
-        """
-        Añadir canción a la cola de Spotify con portada
-        """
+        """Añadir canción a la cola de Spotify con portada"""
         if not self.sp:
             return False
         
         try:
             self.sp.add_to_queue(track_id)
             
-            # Obtener portada del álbum
             album_art = track_info.get('album_art', '')
             if not album_art:
                 try:
@@ -372,10 +412,7 @@ class SpotifyService:
             return False
     
     def get_current_track(self) -> Optional[Dict]:
-        """
-        Obtener canción actual (incluso si está pausada)
-        Devuelve: {name, artist, url, id, duration_ms, is_playing}
-        """
+        """Obtener canción actual (incluso si está pausada)"""
         if not self.sp:
             return None
         
@@ -520,10 +557,7 @@ class SpotifyService:
         log_service.add_log('info', 'Monitoreo de Spotify detenido', 'spotify_service')
     
     def get_playback_state(self) -> Dict:
-        """
-        Obtener estado completo de reproducción con progreso y duración
-        Incluso si está pausado, devuelve la canción actual.
-        """
+        """Obtener estado completo de reproducción con progreso y duración"""
         if not self.sp:
             return {'is_playing': False, 'device': None, 'track': None, 'volume': None}
         
@@ -578,6 +612,32 @@ class SpotifyService:
             logger.error(f"Error en seek: {e}")
             log_service.add_log('error', f'Error en seek: {e}', 'spotify_service')
             return False
+    
+    def remove_from_queue_by_position(self, position: int) -> Optional[str]:
+        """Eliminar una canción de la cola por posición"""
+        if position < 1 or position > len(self.queue_tracks):
+            return None
+        
+        track_id = self.queue_tracks[position - 1]
+        track_name = self.queue_info.get(track_id, {}).get('name', 'Canción')
+        
+        self.queue_tracks.pop(position - 1)
+        if track_id in self.queue_info:
+            del self.queue_info[track_id]
+        
+        logger.info(f"🗑️ Canción eliminada de la cola: {track_name}")
+        log_service.add_log('info', f'Canción eliminada de la cola: {track_name}', 'spotify_service')
+        return track_name
+    
+    def clear_queue(self) -> int:
+        """Limpiar toda la cola"""
+        count = len(self.queue_tracks)
+        self.queue_tracks.clear()
+        self.queue_info.clear()
+        logger.info(f"🧹 Cola limpiada: {count} canciones eliminadas")
+        log_service.add_log('info', f'Cola limpiada: {count} canciones', 'spotify_service')
+        return count
+
 
 # Instancia global
 spotify_service = SpotifyService()
