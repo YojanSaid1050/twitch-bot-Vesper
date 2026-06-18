@@ -1,3 +1,7 @@
+"""
+Servicios del bot de Twitch
+"""
+
 from .twitch_api import TwitchAPI
 from .chat_settings import ChatSettings
 from .stream_manager import StreamManager

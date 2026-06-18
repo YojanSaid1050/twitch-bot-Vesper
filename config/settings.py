@@ -1,151 +1,152 @@
-"""
-Configuración central del bot
-"""
-
 import os
+from pathlib import Path
 from dotenv import load_dotenv
+from config.env_manager import env_manager
+from database.token_repository import TokenRepository
+from utils.logger import get_logger
 
-# Cargar variables de entorno
-load_dotenv()
-
+logger = get_logger(__name__)
 
 class Settings:
-    """Configuración global del bot (Singleton)"""
-    
     _instance = None
-    
+    _initialized = False
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._load_config()
         return cls._instance
-    
-    def _load_config(self):
-        """Cargar configuración desde .env"""
-        # Tokens (limpiar prefix oauth: si existe)
-        self.BOT_TOKEN = os.getenv("BOT_TOKEN", "").replace("oauth:", "")
-        self.BOT_REFRESH_TOKEN = os.getenv("BOT_REFRESH_TOKEN", "")
-        self.BROADCASTER_TOKEN = os.getenv("BROADCASTER_TOKEN", "").replace("oauth:", "")
-        self.BROADCASTER_REFRESH_TOKEN = os.getenv("BROADCASTER_REFRESH_TOKEN", "")
-        
-        # App Access Token (para EventSub)
-        self.APP_ACCESS_TOKEN = os.getenv("APP_ACCESS_TOKEN", "")
-        
-        # IDs y cliente
-        self.CLIENT_ID = os.getenv("CLIENT_ID", "")
-        self.CLIENT_SECRET = os.getenv("CLIENT_SECRET", "")
-        self.BROADCASTER_ID = os.getenv("BROADCASTER_ID", "")
-        self.BOT_ID = os.getenv("BOT_ID", "")
-        
-        # Canal y nombre del bot
-        self.CHANNEL = os.getenv("CHANNEL", "")
-        self.BOT_NICK = os.getenv("BOT_NICK", "")
-        
-        # Spotify credentials
-        self.SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
-        self.SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
-        
-        # EventSub configuration
-        self.EVENTSUB_CALLBACK_URL = os.getenv("EVENTSUB_CALLBACK_URL", "")
-        self.TWITCH_WEBHOOK_SECRET = os.getenv("TWITCH_WEBHOOK_SECRET", "")
-        self.BOT_WEBHOOK_PORT = int(os.getenv("BOT_WEBHOOK_PORT", "5001"))
-        self.BOT_WEBHOOK_URL = os.getenv("BOT_WEBHOOK_URL", "http://localhost:5001/webhook")
-        
-        # Headers para API (se actualizarán dinámicamente)
-        self._update_headers()
-        
-        # Validar configuración
+
+    def __init__(self):
+        if self._initialized:
+            return
+        self._load_static_config()
+        self._load_tokens()
+        self._initialized = True
         self._validate()
-    
-    def _update_headers(self):
-        """Actualizar headers con los tokens actuales"""
-        self.BOT_HEADERS = {
+        # Verificar DATABASE_URL
+        if not os.environ.get("DATABASE_URL"):
+            logger.warning("⚠️ DATABASE_URL no configurada. Los tokens no se persistirán correctamente.")
+
+    def _load_static_config(self):
+        """Carga configuración fija desde .env (no tokens)."""
+        env_vars = env_manager.reload()
+        self.CLIENT_ID = env_vars.get("CLIENT_ID", "")
+        self.CLIENT_SECRET = env_vars.get("CLIENT_SECRET", "")
+        self.CHANNEL = env_vars.get("CHANNEL", "")
+        self.BOT_NICK = env_vars.get("BOT_NICK", "")
+        self.BOT_ID = env_vars.get("BOT_ID", "")
+        self.BROADCASTER_ID = env_vars.get("BROADCASTER_ID", "")
+        self.SPOTIFY_CLIENT_ID = env_vars.get("SPOTIFY_CLIENT_ID", "")
+        self.SPOTIFY_CLIENT_SECRET = env_vars.get("SPOTIFY_CLIENT_SECRET", "")
+        self.EVENTSUB_CALLBACK_URL = env_vars.get("EVENTSUB_CALLBACK_URL", "")
+        self.TWITCH_WEBHOOK_SECRET = env_vars.get("TWITCH_WEBHOOK_SECRET", "")
+        self.BOT_WEBHOOK_PORT = int(env_vars.get("BOT_WEBHOOK_PORT", "5001"))
+        self.BOT_WEBHOOK_URL = env_vars.get("BOT_WEBHOOK_URL", "http://localhost:5001/webhook")
+        self.DASHBOARD_SECRET_KEY = env_vars.get("DASHBOARD_SECRET_KEY", "supersecretkey_change_me")
+
+    def _load_tokens(self):
+        """Carga tokens desde PostgreSQL. Si no existen, los migra desde .env."""
+        token_mapping = {
+            ("twitch", "bot"): ("BOT_TOKEN", "BOT_REFRESH_TOKEN"),
+            ("twitch", "broadcaster"): ("BROADCASTER_TOKEN", "BROADCASTER_REFRESH_TOKEN"),
+            ("twitch", "app"): ("APP_ACCESS_TOKEN", None),
+            ("spotify", "default"): (None, "SPOTIFY_REFRESH_TOKEN"),
+        }
+
+        for (provider, account), (access_attr, refresh_attr) in token_mapping.items():
+            token_data = TokenRepository.get_token(provider, account)
+            if token_data:
+                if access_attr:
+                    setattr(self, access_attr, token_data.get("access_token", ""))
+                if refresh_attr:
+                    setattr(self, refresh_attr, token_data.get("refresh_token", ""))
+            else:
+                # Migrar desde .env si existe
+                env_vars = env_manager.reload()
+                access = env_vars.get(access_attr, "") if access_attr else None
+                refresh = env_vars.get(refresh_attr, "") if refresh_attr else None
+
+                if access or refresh:
+                    TokenRepository.save_token(provider, account, access or "", refresh)
+                    if access_attr:
+                        setattr(self, access_attr, access or "")
+                    if refresh_attr:
+                        setattr(self, refresh_attr, refresh or "")
+                    logger.info(f"✅ Migrado token {provider}/{account} desde .env a PostgreSQL")
+                else:
+                    if access_attr:
+                        setattr(self, access_attr, "")
+                    if refresh_attr:
+                        setattr(self, refresh_attr, "")
+
+        # Atributo adicional para Spotify access token (no guardado en settings)
+        self.SPOTIFY_ACCESS_TOKEN = None
+
+    def reload(self):
+        """Recarga configuración y tokens desde PostgreSQL."""
+        self._load_static_config()
+        self._load_tokens()
+        self._validate()
+        logger.info("🔄 Configuración recargada")
+
+    @property
+    def BOT_HEADERS(self):
+        return {
             "Authorization": f"Bearer {self.BOT_TOKEN}",
             "Client-Id": self.CLIENT_ID,
             "Content-Type": "application/json"
         }
-        
-        self.BROADCASTER_HEADERS = {
+
+    @property
+    def BROADCASTER_HEADERS(self):
+        return {
             "Authorization": f"Bearer {self.BROADCASTER_TOKEN}",
             "Client-Id": self.CLIENT_ID,
             "Content-Type": "application/json"
         }
-    
-    def update_bot_token(self, new_token: str):
-        """Actualizar token del bot"""
+
+    # Métodos para actualizar tokens (usados por TokenManager)
+    def update_bot_token(self, new_token: str, expires_in: int):
         self.BOT_TOKEN = new_token
-        self._update_headers()
-        self._save_to_env("BOT_TOKEN", f"oauth:{new_token}")
-    
-    def update_broadcaster_token(self, new_token: str):
-        """Actualizar token del streamer"""
+        TokenRepository.update_access_token("twitch", "bot", new_token, expires_in)
+
+    def update_broadcaster_token(self, new_token: str, expires_in: int):
         self.BROADCASTER_TOKEN = new_token
-        self._update_headers()
-        self._save_to_env("BROADCASTER_TOKEN", f"oauth:{new_token}")
-    
-    def update_app_token(self, new_token: str):
-        """Actualizar App Access Token"""
+        TokenRepository.update_access_token("twitch", "broadcaster", new_token, expires_in)
+
+    def update_app_token(self, new_token: str, expires_in: int = 5184000):
         self.APP_ACCESS_TOKEN = new_token
-        self._save_to_env("APP_ACCESS_TOKEN", new_token)
-    
-    def _save_to_env(self, key: str, value: str):
-        """Guardar cambio en .env (opcional, para persistencia)"""
-        env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
-        
-        try:
-            with open(env_path, "r") as f:
-                lines = f.readlines()
-            
-            updated = False
-            for i, line in enumerate(lines):
-                if line.startswith(f"{key}="):
-                    lines[i] = f"{key}={value}\n"
-                    updated = True
-                    break
-            
-            if not updated:
-                lines.append(f"{key}={value}\n")
-            
-            with open(env_path, "w") as f:
-                f.writelines(lines)
-            
-            print(f"✅ {key} actualizado en .env")
-        except Exception as e:
-            print(f"⚠️ No se pudo actualizar .env: {e}")
-    
+        TokenRepository.update_access_token("twitch", "app", new_token, expires_in)
+
+    def update_bot_refresh_token(self, new_refresh: str):
+        self.BOT_REFRESH_TOKEN = new_refresh
+        TokenRepository.update_refresh_token("twitch", "bot", new_refresh)
+
+    def update_broadcaster_refresh_token(self, new_refresh: str):
+        self.BROADCASTER_REFRESH_TOKEN = new_refresh
+        TokenRepository.update_refresh_token("twitch", "broadcaster", new_refresh)
+
+    def update_spotify_refresh_token(self, new_refresh: str):
+        self.SPOTIFY_REFRESH_TOKEN = new_refresh
+        TokenRepository.update_refresh_token("spotify", "default", new_refresh)
+
     def _validate(self):
-        """Validar que todas las variables necesarias existen"""
-        required = [
-            ("BOT_TOKEN", self.BOT_TOKEN),
-            ("BROADCASTER_TOKEN", self.BROADCASTER_TOKEN),
-            ("CLIENT_ID", self.CLIENT_ID),
-            ("CLIENT_SECRET", self.CLIENT_SECRET),
-            ("BROADCASTER_ID", self.BROADCASTER_ID),
-            ("BOT_ID", self.BOT_ID),
-            ("CHANNEL", self.CHANNEL),
-        ]
-        
-        missing = [name for name, value in required if not value]
-        
-        if not self.BOT_REFRESH_TOKEN:
-            print("⚠️ BOT_REFRESH_TOKEN no configurado. Los tokens expirarán cada 4 horas.")
-        if not self.BROADCASTER_REFRESH_TOKEN:
-            print("⚠️ BROADCASTER_REFRESH_TOKEN no configurado. Los tokens expirarán cada 4 horas.")
-        
-        if not self.APP_ACCESS_TOKEN:
-            print("⚠️ APP_ACCESS_TOKEN no configurado. Las notificaciones de subs/raids no funcionarán.")
-        
-        if not self.EVENTSUB_CALLBACK_URL:
-            print("⚠️ EVENTSUB_CALLBACK_URL no configurado. Las notificaciones automáticas no funcionarán.")
-        if not self.TWITCH_WEBHOOK_SECRET:
-            print("⚠️ TWITCH_WEBHOOK_SECRET no configurado. Las notificaciones automáticas no funcionarán.")
-        
+        required = {
+            "CLIENT_ID": self.CLIENT_ID,
+            "CLIENT_SECRET": self.CLIENT_SECRET,
+            "BROADCASTER_ID": self.BROADCASTER_ID,
+            "BOT_ID": self.BOT_ID,
+            "CHANNEL": self.CHANNEL,
+        }
+        missing = [name for name, value in required.items() if not value]
         if missing:
-            raise ValueError(
-                f"❌ Variables de entorno faltantes: {', '.join(missing)}\n"
-                "Revisa tu archivo .env"
-            )
+            raise ValueError(f"❌ Variables obligatorias faltantes: {', '.join(missing)}")
 
+        if not self.BOT_REFRESH_TOKEN:
+            logger.warning("⚠️ BOT_REFRESH_TOKEN no configurado en base de datos.")
+        if not self.BROADCASTER_REFRESH_TOKEN:
+            logger.warning("⚠️ BROADCASTER_REFRESH_TOKEN no configurado en base de datos.")
+        if not self.SPOTIFY_REFRESH_TOKEN:
+            logger.warning("⚠️ SPOTIFY_REFRESH_TOKEN no configurado en base de datos.")
 
-# Instancia global
 settings = Settings()
