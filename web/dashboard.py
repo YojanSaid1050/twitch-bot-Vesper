@@ -225,7 +225,7 @@ def api_dashboard_data():
         data = {
             'timestamp': datetime.now().isoformat(),
             'status': {
-                'connected': True,
+                'connected': True,  # <--- NUEVO: indica que el bot está conectado
                 'live': False,
                 'viewers': 0,
                 'game': 'No especificado',

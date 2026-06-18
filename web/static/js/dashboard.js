@@ -364,7 +364,7 @@ function truncate(text, length = 50) {
 }
 
 // ============================================
-// ESTADO DEL BOT
+// ESTADO DEL BOT (INDEPENDIENTE DEL STREAM)
 // ============================================
 
 async function updateBotStatus() {
@@ -373,9 +373,11 @@ async function updateBotStatus() {
         const dot = document.querySelector('.status-dot');
         const text = document.querySelector('.bot-status span');
         
-        if (data.status && data.status.live) {
+        // Verificar si el bot está conectado (no si el stream está en vivo)
+        // connected = true significa que el bot responde y está conectado a Twitch
+        if (data.status && data.status.connected) {
             dot.className = 'status-dot online';
-            text.textContent = 'En Vivo';
+            text.textContent = 'Conectado';
         } else {
             dot.className = 'status-dot offline';
             text.textContent = 'Desconectado';
@@ -384,6 +386,11 @@ async function updateBotStatus() {
         return data;
     } catch (error) {
         console.error('Error actualizando estado:', error);
+        // En caso de error, mostrar como desconectado
+        const dot = document.querySelector('.status-dot');
+        const text = document.querySelector('.bot-status span');
+        if (dot) dot.className = 'status-dot offline';
+        if (text) text.textContent = 'Desconectado';
     }
 }
 
