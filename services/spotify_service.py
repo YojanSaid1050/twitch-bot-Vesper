@@ -10,7 +10,6 @@ import threading
 import time
 import requests.exceptions
 import os
-import json
 
 from config import settings
 from utils.logger import get_logger
@@ -45,82 +44,70 @@ class SpotifyService:
             log_service.add_log('warning', 'Spotify no configurado (faltan credenciales)', 'spotify_service')
     
     def _authenticate(self):
-        """Autenticar con Spotify usando caché y refresh automático"""
+        """Autenticar con Spotify usando refresh token desde variables de entorno"""
         try:
-            # Verificar si el caché existe y es válido
-            cache_path = ".spotify_cache"
-            token_info = None
+            # Obtener refresh token desde variables de entorno
+            refresh_token = os.getenv('SPOTIFY_REFRESH_TOKEN', '')
             
-            if os.path.exists(cache_path):
-                try:
-                    with open(cache_path, 'r') as f:
-                        token_info = json.load(f)
-                    logger.info("📂 Caché de Spotify cargado")
-                except Exception as e:
-                    logger.warning(f"⚠️ Error cargando caché de Spotify: {e}")
-                    token_info = None
+            if not refresh_token:
+                logger.warning("⚠️ No hay SPOTIFY_REFRESH_TOKEN configurado en variables de entorno")
+                logger.warning("💡 Agrega SPOTIFY_REFRESH_TOKEN a las variables de entorno de Render")
+                log_service.add_log('warning', 'No hay SPOTIFY_REFRESH_TOKEN configurado', 'spotify_service')
+                self.sp = None
+                return
             
-            # Crear auth manager con open_browser=False
+            # Crear auth manager sin caché, solo para usar el refresh token
             auth_manager = SpotifyOAuth(
                 client_id=self.client_id,
                 client_secret=self.client_secret,
                 redirect_uri=self.redirect_uri,
                 scope=self.scope,
-                cache_path=cache_path,
-                open_browser=False,  # No abrir navegador
-                show_dialog=False     # No mostrar diálogo de autenticación
+                cache_path=None,  # No usar caché en disco
+                open_browser=False,
+                show_dialog=False
             )
             
-            # Si hay token_info, validar y refrescar si es necesario
-            if token_info:
-                # Verificar si el token está expirado
-                if auth_manager.is_token_expired(token_info):
-                    logger.info("🔄 Token de Spotify expirado, refrescando...")
-                    token_info = auth_manager.refresh_access_token(
-                        token_info['refresh_token']
-                    )
-                    # Guardar el nuevo token en caché
-                    auth_manager.cache_handler.save_token_to_cache(token_info)
-                    logger.info("✅ Token de Spotify refrescado automáticamente")
-                    log_service.add_log('info', 'Token de Spotify refrescado automáticamente', 'spotify_service')
-                else:
-                    logger.info("✅ Token de Spotify válido (usando caché)")
-                    log_service.add_log('info', 'Token de Spotify válido (usando caché)', 'spotify_service')
+            # Intentar obtener un nuevo access token usando el refresh token
+            logger.info("🔄 Generando nuevo access token de Spotify desde refresh token...")
             
-            # Crear el cliente de Spotify con el auth_manager
-            self.sp = spotipy.Spotify(auth_manager=auth_manager)
-            
-            # Verificar que la autenticación funciona
             try:
-                self.sp.current_user()
-                logger.info("✅ Autenticado con Spotify correctamente")
-                log_service.add_log('info', 'Autenticado con Spotify correctamente', 'spotify_service')
-            except Exception as e:
-                if "token expired" in str(e).lower():
-                    logger.warning("⚠️ Token expirado, forzando refresh...")
-                    # Forzar refresh del token
-                    token_info = auth_manager.refresh_access_token(
-                        token_info['refresh_token'] if token_info else None
-                    )
-                    if token_info:
-                        auth_manager.cache_handler.save_token_to_cache(token_info)
-                        self.sp = spotipy.Spotify(auth_manager=auth_manager)
-                        logger.info("✅ Token refrescado y autenticado")
-                        log_service.add_log('info', 'Token refrescado y autenticado', 'spotify_service')
-                    else:
-                        raise
+                # Método directo para refrescar el token
+                token_info = auth_manager.refresh_access_token(refresh_token)
+                
+                if token_info and token_info.get('access_token'):
+                    # Crear el cliente con el token fresco
+                    self.sp = spotipy.Spotify(auth_manager=auth_manager)
+                    # Forzar el token en el auth_manager
+                    auth_manager.token_info = token_info
+                    
+                    logger.info("✅ Token de Spotify generado correctamente")
+                    log_service.add_log('info', 'Token de Spotify generado desde refresh token', 'spotify_service')
+                    
+                    # Verificar que funciona
+                    try:
+                        self.sp.current_user()
+                        logger.info("✅ Autenticación con Spotify verificada correctamente")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Verificación falló, pero el token puede funcionar: {e}")
                 else:
-                    raise
+                    logger.error("❌ No se pudo generar token de Spotify con el refresh token")
+                    log_service.add_log('error', 'No se pudo generar token de Spotify con refresh token', 'spotify_service')
+                    self.sp = None
+                    
+            except Exception as e:
+                error_msg = str(e)
+                if "invalid refresh token" in error_msg.lower():
+                    logger.error("❌ Refresh token inválido o expirado. Genera uno nuevo localmente.")
+                    logger.error("💡 Ejecuta en local: python generate_spotify_token.py")
+                    log_service.add_log('error', 'Refresh token de Spotify inválido', 'spotify_service')
+                else:
+                    logger.error(f"❌ Error generando token de Spotify: {e}")
+                    log_service.add_log('error', f'Error generando token de Spotify: {e}', 'spotify_service')
+                self.sp = None
                 
         except Exception as e:
-            error_msg = str(e)
-            if "Server listening on localhost" in error_msg or "EOF" in error_msg:
-                logger.warning("⚠️ Spotify necesita autenticación inicial. Genera el token localmente primero.")
-                logger.warning("💡 Ejecuta 'python generate_tokens_manual.py' o autentica en tu máquina local")
-                log_service.add_log('warning', 'Spotify necesita autenticación inicial en local', 'spotify_service')
-            else:
-                logger.error(f"❌ Error autenticando con Spotify: {e}")
-                log_service.add_log('error', f'Error autenticando con Spotify: {e}', 'spotify_service')
+            logger.error(f"❌ Error autenticando con Spotify: {e}")
+            log_service.add_log('error', f'Error autenticando con Spotify: {e}', 'spotify_service')
             self.sp = None
     
     def _start_monitoring(self):
@@ -152,6 +139,7 @@ class SpotifyService:
                         time.sleep(5)
                 except Exception as e:
                     error_msg = str(e)
+                    now = time.time()
                     if "EOF" in error_msg or "Server listening" in error_msg:
                         # Estos errores son esperados en Render, solo log como debug
                         if now - self._last_error_time > 300:  # Cada 5 minutos
