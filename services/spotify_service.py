@@ -9,6 +9,8 @@ from collections import deque
 import threading
 import time
 import requests.exceptions
+import os
+import json
 
 from config import settings
 from utils.logger import get_logger
@@ -27,13 +29,13 @@ class SpotifyService:
         self.scope = "user-modify-playback-state user-read-playback-state user-read-currently-playing user-read-playback-state"
         
         self.sp = None
-        self.queue_tracks: List[str] = []  # Lista ordenada de IDs de canciones en cola
-        self.queue_info: Dict[str, dict] = {}  # Info de cada canción en cola
+        self.queue_tracks: List[str] = []
+        self.queue_info: Dict[str, dict] = {}
         self.queue_history: deque = deque(maxlen=10)
         self.current_track_id = None
         self._monitoring = False
         self._last_error_time = 0
-        self._error_cooldown = 30  # No repetir el mismo error más de cada 30 segundos
+        self._error_cooldown = 30
         
         if self.client_id and self.client_secret:
             self._authenticate()
@@ -43,23 +45,79 @@ class SpotifyService:
             log_service.add_log('warning', 'Spotify no configurado (faltan credenciales)', 'spotify_service')
     
     def _authenticate(self):
-        """Autenticar con Spotify sin abrir navegador (usando caché)"""
+        """Autenticar con Spotify usando caché y refresh automático"""
         try:
-            self.sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
+            # Verificar si el caché existe y es válido
+            cache_path = ".spotify_cache"
+            token_info = None
+            
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, 'r') as f:
+                        token_info = json.load(f)
+                    logger.info("📂 Caché de Spotify cargado")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error cargando caché de Spotify: {e}")
+                    token_info = None
+            
+            # Crear auth manager con open_browser=False
+            auth_manager = SpotifyOAuth(
                 client_id=self.client_id,
                 client_secret=self.client_secret,
                 redirect_uri=self.redirect_uri,
                 scope=self.scope,
-                cache_path=".spotify_cache",
-                open_browser=False  # <--- CLAVE: no abrir navegador
-            ))
-            logger.info("✅ Autenticado con Spotify (usando caché)")
-            log_service.add_log('info', 'Autenticado con Spotify (usando caché)', 'spotify_service')
+                cache_path=cache_path,
+                open_browser=False,  # No abrir navegador
+                show_dialog=False     # No mostrar diálogo de autenticación
+            )
+            
+            # Si hay token_info, validar y refrescar si es necesario
+            if token_info:
+                # Verificar si el token está expirado
+                if auth_manager.is_token_expired(token_info):
+                    logger.info("🔄 Token de Spotify expirado, refrescando...")
+                    token_info = auth_manager.refresh_access_token(
+                        token_info['refresh_token']
+                    )
+                    # Guardar el nuevo token en caché
+                    auth_manager.cache_handler.save_token_to_cache(token_info)
+                    logger.info("✅ Token de Spotify refrescado automáticamente")
+                    log_service.add_log('info', 'Token de Spotify refrescado automáticamente', 'spotify_service')
+                else:
+                    logger.info("✅ Token de Spotify válido (usando caché)")
+                    log_service.add_log('info', 'Token de Spotify válido (usando caché)', 'spotify_service')
+            
+            # Crear el cliente de Spotify con el auth_manager
+            self.sp = spotipy.Spotify(auth_manager=auth_manager)
+            
+            # Verificar que la autenticación funciona
+            try:
+                self.sp.current_user()
+                logger.info("✅ Autenticado con Spotify correctamente")
+                log_service.add_log('info', 'Autenticado con Spotify correctamente', 'spotify_service')
+            except Exception as e:
+                if "token expired" in str(e).lower():
+                    logger.warning("⚠️ Token expirado, forzando refresh...")
+                    # Forzar refresh del token
+                    token_info = auth_manager.refresh_access_token(
+                        token_info['refresh_token'] if token_info else None
+                    )
+                    if token_info:
+                        auth_manager.cache_handler.save_token_to_cache(token_info)
+                        self.sp = spotipy.Spotify(auth_manager=auth_manager)
+                        logger.info("✅ Token refrescado y autenticado")
+                        log_service.add_log('info', 'Token refrescado y autenticado', 'spotify_service')
+                    else:
+                        raise
+                else:
+                    raise
+                
         except Exception as e:
-            # Manejar el error específico de "Server listening on localhost"
-            if "Server listening on localhost" in str(e):
-                logger.warning("⚠️ Spotify necesita autenticación inicial. Asegúrate de tener un token válido en .spotify_cache.")
-                log_service.add_log('warning', 'Spotify necesita autenticación inicial. Usa el script de generación de tokens.', 'spotify_service')
+            error_msg = str(e)
+            if "Server listening on localhost" in error_msg or "EOF" in error_msg:
+                logger.warning("⚠️ Spotify necesita autenticación inicial. Genera el token localmente primero.")
+                logger.warning("💡 Ejecuta 'python generate_tokens_manual.py' o autentica en tu máquina local")
+                log_service.add_log('warning', 'Spotify necesita autenticación inicial en local', 'spotify_service')
             else:
                 logger.error(f"❌ Error autenticando con Spotify: {e}")
                 log_service.add_log('error', f'Error autenticando con Spotify: {e}', 'spotify_service')
@@ -93,9 +151,17 @@ class SpotifyService:
                     else:
                         time.sleep(5)
                 except Exception as e:
-                    logger.error(f"Error en monitoreo de Spotify: {e}")
-                    log_service.add_log('error', f'Error en monitoreo de Spotify: {e}', 'spotify_service')
-                    time.sleep(5)
+                    error_msg = str(e)
+                    if "EOF" in error_msg or "Server listening" in error_msg:
+                        # Estos errores son esperados en Render, solo log como debug
+                        if now - self._last_error_time > 300:  # Cada 5 minutos
+                            logger.debug(f"Spotify en modo espera: {error_msg[:50]}")
+                            self._last_error_time = now
+                        time.sleep(10)
+                    else:
+                        logger.error(f"Error en monitoreo de Spotify: {e}")
+                        log_service.add_log('error', f'Error en monitoreo de Spotify: {e}', 'spotify_service')
+                        time.sleep(5)
         
         thread = threading.Thread(target=monitor, daemon=True)
         thread.start()
@@ -524,7 +590,6 @@ class SpotifyService:
             logger.error(f"Error en seek: {e}")
             log_service.add_log('error', f'Error en seek: {e}', 'spotify_service')
             return False
-
 
 # Instancia global
 spotify_service = SpotifyService()
