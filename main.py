@@ -8,6 +8,7 @@ import sys
 import signal
 import threading
 import time
+import asyncio
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -70,6 +71,14 @@ def main():
     logger.info("🕯️ Iniciando VesperBot...")
     log_service.add_log('info', 'Iniciando VesperBot...', 'main')
 
+    # ===== NUEVO: CREAR Y CONFIGURAR EL EVENT LOOP =====
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        # Si no hay loop, crear uno nuevo
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
     # Iniciar dashboard en hilo separado
     dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
     dashboard_thread.start()
