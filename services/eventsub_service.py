@@ -1,6 +1,7 @@
 """
 Servicio para manejar EventSub de Twitch
-Suscripciones a todos los eventos relevantes usando el token del broadcaster (User Access Token)
+Suscripciones a todos los eventos relevantes usando App Access Token
+(Requerido para el transporte Webhook según documentación oficial)
 """
 
 import asyncio
@@ -28,10 +29,7 @@ class EventSubService:
         log_service.add_log('info', 'EventSub service vinculado al bot', 'bot')
 
     def _process_event(self, event_type: str, event_data: Dict):
-        """
-        Procesa eventos entrantes y los registra en los logs.
-        Los eventos se clasifican por fuente: 'moderation', 'stats' o 'system'.
-        """
+        """Procesa eventos entrantes y los registra en los logs."""
         async def send_notification():
             try:
                 if not self.channel:
@@ -162,15 +160,14 @@ class EventSubService:
 
     def subscribe_to_events(self):
         """
-        Suscribirse a todos los eventos relevantes usando el token del broadcaster.
-        Los User Access Tokens (como el BROADCASTER_TOKEN) tienen los scopes necesarios
-        para moderación, suscripciones, etc.
+        Suscribirse a todos los eventos relevantes usando App Access Token.
+        SEGÚN DOCUMENTACIÓN OFICIAL: Para webhooks, DEBE usarse App Access Token.
         """
-        # Usamos el BROADCASTER_TOKEN (User Access Token) porque tiene los scopes necesarios
-        user_token = settings.BROADCASTER_TOKEN
-        if not user_token:
-            logger.error("❌ No hay BROADCASTER_TOKEN configurado")
-            log_service.add_log('error', 'No hay BROADCASTER_TOKEN para EventSub', 'bot')
+        # ===== CAMBIO CLAVE: Volver a App Access Token =====
+        app_token = getattr(settings, 'APP_ACCESS_TOKEN', '')
+        if not app_token:
+            logger.error("❌ No hay APP_ACCESS_TOKEN configurado")
+            log_service.add_log('error', 'No hay APP_ACCESS_TOKEN configurado para EventSub', 'bot')
             return
 
         callback_url = settings.EVENTSUB_CALLBACK_URL
@@ -180,7 +177,7 @@ class EventSubService:
             return
 
         headers = {
-            "Authorization": f"Bearer {user_token}",
+            "Authorization": f"Bearer {app_token}",
             "Client-Id": settings.CLIENT_ID,
             "Content-Type": "application/json"
         }
@@ -210,7 +207,7 @@ class EventSubService:
             # Cheers
             ("channel.cheer", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
 
-            # Stream online/offline
+            # Stream
             ("stream.online", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
             ("stream.offline", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
 
@@ -226,7 +223,7 @@ class EventSubService:
             ("channel.hype_train.begin", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
             ("channel.hype_train.end", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
 
-            # Redenciones de puntos de canal
+            # Redenciones de puntos
             ("channel.channel_points_custom_reward_redemption.add", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
         ]
 
@@ -264,7 +261,7 @@ class EventSubService:
                 logger.error(f"Error en {event_type}: {e}")
                 log_service.add_log('error', f'Error en {event_type}: {e}', 'bot')
 
-        # Iniciar polling de follows como respaldo (por si EventSub falla)
+        # Iniciar polling de follows como respaldo
         if self.bot and self.bot.loop:
             asyncio.run_coroutine_threadsafe(
                 self._start_follow_polling(),
@@ -276,10 +273,10 @@ class EventSubService:
         notification_service.start_follow_polling()
 
     def stop(self):
-        """Detiene el servicio (no hay servidor webhook que detener)."""
+        """Detiene el servicio."""
         logger.info("🛑 EventSub detenido")
         log_service.add_log('info', 'EventSub detenido', 'bot')
 
 
-# Instancia global
+# ===== INSTANCIA GLOBAL =====
 eventsub_service = EventSubService()
