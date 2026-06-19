@@ -303,7 +303,7 @@ BROADCASTER_SCOPES = [
     # Para channel.follow
     "moderator:read:followers",
 
-    # Para channel.ban y channel.unban
+    # Para channel.ban y channel.unban ⚠️ CRÍTICO
     "moderator:manage:banned_users",
 
     # Para channel.chat.message_delete, channel.chat.clear, channel.chat.clear_user_messages
