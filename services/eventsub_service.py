@@ -1,6 +1,6 @@
 """
 Servicio para manejar EventSub de Twitch
-Suscripciones a todos los eventos relevantes usando App Access Token (según documentación oficial)
+Suscripciones a todos los eventos relevantes usando el token del broadcaster (User Access Token)
 """
 
 import asyncio
@@ -65,8 +65,6 @@ class EventSubService:
                 elif event_type == "channel.follow":
                     user = event_data.get("user_name", "Desconocido")
                     log_service.add_log('info', f'⭐ Nuevo seguidor: {user}', 'stats')
-                    # Opcional: notificación en chat
-                    # await self.channel.send(f"🕯️ Una nueva alma se une al ritual... ¡Bienvenido, {user}!")
 
                 # ========== EVENTOS DE SUSCRIPCIONES ==========
                 elif event_type == "channel.subscribe":
@@ -75,25 +73,21 @@ class EventSubService:
                     is_gift = event_data.get("is_gift", False)
                     if not is_gift:
                         log_service.add_log('info', f'🎉 Nueva suscripción de {user} (Tier {tier})', 'stats')
-                        # Notificar al sistema de notificaciones
                         await notification_service.on_subscribe(self.channel, user, tier, "sub")
                     else:
                         log_service.add_log('info', f'🎁 Suscripción regalada a {user} (Tier {tier})', 'stats')
 
                 elif event_type == "channel.subscription.gift":
-                    user = event_data.get("user_name", "Alguien")  # quien regala
+                    user = event_data.get("user_name", "Alguien")
                     total = event_data.get("total", 1)
                     tier = event_data.get("tier", "1000")
                     log_service.add_log('info', f'🎁 {user} regaló {total} suscripción(es) Tier {tier}', 'stats')
-                    # Notificación en chat (opcional)
-                    # await self.channel.send(f"🎁 {user} ha ofrendado {total} suscripción(es) Tier {tier}! El altar se ilumina.")
 
                 elif event_type == "channel.subscription.message":
                     user = event_data.get("user_name", "Desconocido")
                     tier = event_data.get("tier", "1000")
                     message = event_data.get("message", {}).get("text", "")
                     log_service.add_log('info', f'💬 Re-suscripción de {user} (Tier {tier}) con mensaje: "{message[:50]}"', 'stats')
-                    # También se puede notificar en chat
 
                 # ========== EVENTOS DE RAIDS ==========
                 elif event_type == "channel.raid":
@@ -108,17 +102,13 @@ class EventSubService:
                     bits = event_data.get("bits", 0)
                     message = event_data.get("message", "")
                     log_service.add_log('info', f'💎 {user} envió {bits} bits - Mensaje: "{message[:30]}"', 'stats')
-                    # Notificación en chat (opcional)
-                    # await self.channel.send(f"💎 {user} ha derramado {bits} bits sobre el altar!")
 
-                # ========== EVENTOS DE STREAM (online/offline) ==========
+                # ========== EVENTOS DE STREAM ==========
                 elif event_type == "stream.online":
                     streamer = event_data.get("broadcaster_user_name", "Desconocido")
                     game = event_data.get("game_name", "No especificado")
                     title = event_data.get("title", "Sin título")
                     log_service.add_log('info', f'📡 Stream EN VIVO: {streamer} está jugando {game} - "{title}"', 'system')
-                    # Notificación en chat (opcional)
-                    # await self.channel.send(f"📡 El ritual ha comenzado! {streamer} está jugando {game}.")
 
                 elif event_type == "stream.offline":
                     streamer = event_data.get("broadcaster_user_name", "Desconocido")
@@ -157,14 +147,11 @@ class EventSubService:
                     total = event_data.get("total", 0)
                     log_service.add_log('info', f'🚂 Hype Train finalizado! Nivel alcanzado {level} - Total: {total}', 'stats')
 
-                # ========== EVENTOS DE REDENCIÓN DE PUNTOS DE CANAL ==========
+                # ========== EVENTOS DE REDENCIÓN DE PUNTOS ==========
                 elif event_type == "channel.channel_points_custom_reward_redemption.add":
                     user = event_data.get("user_name", "Desconocido")
                     reward_title = event_data.get("reward", {}).get("title", "Recompensa")
                     log_service.add_log('info', f'🎯 {user} redimió puntos: {reward_title}', 'stats')
-
-                # ========== EVENTOS DE SUSCRIPCIÓN A EVENTOS (confirmación) ==========
-                # No se procesan, son internos
 
             except Exception as e:
                 logger.error(f"Error procesando evento {event_type}: {e}")
@@ -175,14 +162,15 @@ class EventSubService:
 
     def subscribe_to_events(self):
         """
-        Suscribirse a todos los eventos relevantes usando App Access Token.
-        Según documentación oficial de Twitch, las suscripciones por webhook
-        requieren App Access Token (no User Access Token).
+        Suscribirse a todos los eventos relevantes usando el token del broadcaster.
+        Los User Access Tokens (como el BROADCASTER_TOKEN) tienen los scopes necesarios
+        para moderación, suscripciones, etc.
         """
-        app_token = getattr(settings, 'APP_ACCESS_TOKEN', '')
-        if not app_token:
-            logger.error("❌ No hay APP_ACCESS_TOKEN configurado")
-            log_service.add_log('error', 'No hay APP_ACCESS_TOKEN configurado para EventSub', 'bot')
+        # Usamos el BROADCASTER_TOKEN (User Access Token) porque tiene los scopes necesarios
+        user_token = settings.BROADCASTER_TOKEN
+        if not user_token:
+            logger.error("❌ No hay BROADCASTER_TOKEN configurado")
+            log_service.add_log('error', 'No hay BROADCASTER_TOKEN para EventSub', 'bot')
             return
 
         callback_url = settings.EVENTSUB_CALLBACK_URL
@@ -192,14 +180,14 @@ class EventSubService:
             return
 
         headers = {
-            "Authorization": f"Bearer {app_token}",
+            "Authorization": f"Bearer {user_token}",
             "Client-Id": settings.CLIENT_ID,
             "Content-Type": "application/json"
         }
 
         # Lista completa de eventos a suscribir
         events = [
-            # Moderación (requieren scopes en el token del usuario, pero la suscripción es con App Token)
+            # Moderación
             ("channel.ban", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
             ("channel.unban", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
             ("channel.timeout", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
@@ -208,7 +196,7 @@ class EventSubService:
             # Seguidores (requiere moderator_user_id para v2)
             ("channel.follow", "2", {
                 "broadcaster_user_id": settings.BROADCASTER_ID,
-                "moderator_user_id": settings.BOT_ID  # El bot es moderador
+                "moderator_user_id": settings.BOT_ID
             }),
 
             # Suscripciones
@@ -292,4 +280,6 @@ class EventSubService:
         logger.info("🛑 EventSub detenido")
         log_service.add_log('info', 'EventSub detenido', 'bot')
 
+
+# Instancia global
 eventsub_service = EventSubService()
