@@ -291,7 +291,7 @@ class EventSubService:
                 self._handlers[event.type] = self._on_generic_event
 
     # ============================================================
-    # ESPERA DEL WEBHOOK
+    # ESPERA DEL WEBHOOK (nueva ruta /twitch/webhook)
     # ============================================================
 
     def wait_for_webhook(self, timeout: int = 60, check_interval: int = 2):
@@ -619,12 +619,15 @@ class EventSubService:
 
         if key in existing:
             self.stats["subscriptions_skipped"] += 1
+            # ✅ Log de evento ya existente (skipped)
+            logger.info(f"⏭️ {event_def.type} ya existe, omitiendo")
             return True
 
         # Verificar scopes antes de crear
         if event_def.required_scopes:
             if not self._has_required_scopes(event_def.required_scopes):
                 self.stats["subscriptions_failed_scopes"] += 1
+                # ✅ Log de evento omitido por scopes faltantes
                 logger.warning(f"⚠️ Omitiendo {event_def.type}: Scopes faltantes: {', '.join(event_def.required_scopes)}")
                 log_service.add_log('warning', f'Omitiendo {event_def.type}: Scopes faltantes', 'bot')
                 return False
@@ -644,6 +647,9 @@ class EventSubService:
                 }
             }
 
+            # ✅ Log de intento de suscripción
+            logger.info(f"📡 Intentando suscribir: {event_def.type} (v{event_def.version})")
+
             r = self.session.post(
                 "https://api.twitch.tv/helix/eventsub/subscriptions",
                 headers=headers,
@@ -654,6 +660,7 @@ class EventSubService:
             if r.status_code == 202:
                 self.stats["subscriptions_created"] += 1
                 existing.add(key)
+                # ✅ Log de éxito
                 logger.info(f"✅ Suscrito a {event_def.type} (v{event_def.version})")
                 log_service.add_log('info', f'Suscrito a {event_def.type}', 'bot')
                 return True
@@ -661,6 +668,8 @@ class EventSubService:
             if r.status_code == 409:
                 existing.add(key)
                 self.stats["subscriptions_skipped"] += 1
+                # ✅ Log de conflicto (ya existe)
+                logger.info(f"⏭️ {event_def.type} ya existe (409), omitiendo")
                 return True
 
             # Errores que no deben reintentarse (400, 401, 403)
@@ -673,10 +682,12 @@ class EventSubService:
                     pass
 
                 if r.status_code == 403:
+                    # ✅ Log de error 403 (scopes insuficientes)
                     logger.warning(f"⚠️ {event_def.type}: 403 - {error_detail} (scopes insuficientes)")
                     log_service.add_log('warning', f'{event_def.type}: 403 - Scopes insuficientes', 'bot')
                     self.stats["subscriptions_failed_scopes"] += 1
                 else:
+                    # ✅ Log de otros errores 4xx
                     logger.error(f"❌ Error en {event_def.type}: {r.status_code} - {error_detail}")
                     log_service.add_log('error', f'Error suscribiendo a {event_def.type}: {r.status_code}', 'bot')
                     self.stats["subscription_errors"] += 1
@@ -684,16 +695,19 @@ class EventSubService:
 
             # Errores que pueden reintentarse (429, 5xx)
             if r.status_code in (429, 500, 502, 503, 504):
+                # ✅ Log de error temporal
                 logger.warning(f"⚠️ {event_def.type}: {r.status_code} - reintentando más tarde")
                 return False
 
             self.stats["subscription_errors"] += 1
+            # ✅ Log de error desconocido
             logger.error(f"❌ Error en {event_def.type}: {r.status_code} - {r.text}")
             log_service.add_log('error', f'Error suscribiendo a {event_def.type}: {r.status_code}', 'bot')
             return False
 
         except Exception as e:
             self.stats["subscription_errors"] += 1
+            # ✅ Log de excepción
             logger.error(f"❌ Excepción en {event_def.type}: {e}", exc_info=True)
             log_service.add_log('error', f'Excepción suscribiendo a {event_def.type}: {e}', 'bot')
             return False
@@ -731,6 +745,7 @@ class EventSubService:
 
         successful = 0
         failed = 0
+        skipped = 0
 
         for event_def in EVENTS:
             result = self._ensure_subscription(headers, event_def, existing, moderator_id)
@@ -741,7 +756,7 @@ class EventSubService:
             # Pequeña pausa para evitar rate limiting
             time.sleep(0.5)
 
-        logger.info(f"📊 Resultado: {successful} suscripciones creadas, {failed} fallidas")
+        logger.info(f"📊 Resultado: {successful} suscripciones creadas, {failed} fallidas, {len(existing)} existentes")
         log_service.add_log('info', f'EventSub: {successful} creadas, {failed} fallidas', 'bot')
 
     # ============================================================
