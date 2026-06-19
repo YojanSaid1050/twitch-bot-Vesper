@@ -1,13 +1,20 @@
+# config/settings.py
 import os
+import sys
+import codecs
 from pathlib import Path
 from dotenv import load_dotenv
 from config.env_manager import env_manager
 from database.token_repository import TokenRepository
 from utils.logger import get_logger
 
-# Cargar .env local solo si existe (para desarrollo)
-load_dotenv()
+# Forzar UTF-8 en stdout/stderr para emojis
+if sys.stdout.encoding != 'UTF-8':
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+if sys.stderr.encoding != 'UTF-8':
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
+load_dotenv()
 logger = get_logger(__name__)
 
 class Settings:
@@ -30,12 +37,6 @@ class Settings:
             logger.warning("⚠️ DATABASE_URL no configurada. Los tokens no se persistirán correctamente.")
 
     def _load_static_config(self):
-        """
-        Carga configuración fija.
-        Prioriza las variables del entorno del sistema (os.environ).
-        Si no están, intenta cargarlas desde .env (a través de env_manager).
-        """
-        # Primero, intentar desde os.environ (producción)
         self.CLIENT_ID = os.environ.get("CLIENT_ID", "")
         self.CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "")
         self.CHANNEL = os.environ.get("CHANNEL", "")
@@ -49,8 +50,9 @@ class Settings:
         self.BOT_WEBHOOK_PORT = int(os.environ.get("BOT_WEBHOOK_PORT", "5001"))
         self.BOT_WEBHOOK_URL = os.environ.get("BOT_WEBHOOK_URL", "http://localhost:5001/webhook")
         self.DASHBOARD_SECRET_KEY = os.environ.get("DASHBOARD_SECRET_KEY", "supersecretkey_change_me")
+        self.MODERATOR_USER_ID = os.environ.get("MODERATOR_USER_ID", self.BROADCASTER_ID)
 
-        # Si alguna variable obligatoria sigue vacía, intentar cargarla desde .env (fallback)
+        # Fallback a .env si faltan variables
         if not self.CLIENT_ID or not self.CLIENT_SECRET:
             env_vars = env_manager.reload()
             if not self.CLIENT_ID:
@@ -65,13 +67,15 @@ class Settings:
                 self.BOT_ID = env_vars.get("BOT_ID", "")
             if not self.BROADCASTER_ID:
                 self.BROADCASTER_ID = env_vars.get("BROADCASTER_ID", "")
+            if not self.MODERATOR_USER_ID:
+                self.MODERATOR_USER_ID = env_vars.get("MODERATOR_USER_ID", self.BROADCASTER_ID)
 
     def _load_tokens(self):
-        """Carga tokens desde PostgreSQL. Si no existen, los migra desde .env."""
         token_mapping = {
             ("twitch", "bot"): ("BOT_TOKEN", "BOT_REFRESH_TOKEN"),
             ("twitch", "broadcaster"): ("BROADCASTER_TOKEN", "BROADCASTER_REFRESH_TOKEN"),
             ("twitch", "app"): ("APP_ACCESS_TOKEN", None),
+            ("twitch", "moderator"): ("MODERATOR_ACCESS_TOKEN", "MODERATOR_REFRESH_TOKEN"),
             ("spotify", "default"): (None, "SPOTIFY_REFRESH_TOKEN"),
         }
 
@@ -83,7 +87,6 @@ class Settings:
                 if refresh_attr:
                     setattr(self, refresh_attr, token_data.get("refresh_token", ""))
             else:
-                # Migrar desde .env si existe
                 env_vars = env_manager.reload()
                 access = env_vars.get(access_attr, "") if access_attr else None
                 refresh = env_vars.get(refresh_attr, "") if refresh_attr else None
@@ -101,11 +104,14 @@ class Settings:
                     if refresh_attr:
                         setattr(self, refresh_attr, "")
 
-        # Atributo adicional para Spotify access token (no guardado en settings)
-        self.SPOTIFY_ACCESS_TOKEN = None
+        # Si MODERATOR_USER_ID no está configurado, usar BROADCASTER_ID
+        if not getattr(self, "MODERATOR_USER_ID", ""):
+            self.MODERATOR_USER_ID = self.BROADCASTER_ID
+
+        # NO sincronizar tokens aquí. Lo hará TokenManager después del refresh.
+        logger.info("🔁 La sincronización de MODERATOR con BROADCASTER se hará en TokenManager.")
 
     def reload(self):
-        """Recarga configuración y tokens desde PostgreSQL."""
         self._load_static_config()
         self._load_tokens()
         self._validate()
@@ -127,30 +133,53 @@ class Settings:
             "Content-Type": "application/json"
         }
 
-    # Métodos para actualizar tokens (usados por TokenManager)
+    # ============================================================
+    # MÉTODOS DE ACTUALIZACIÓN (SIN SINCRONIZACIÓN DE MODERADOR)
+    # ============================================================
     def update_bot_token(self, new_token: str, expires_in: int):
         self.BOT_TOKEN = new_token
         TokenRepository.update_access_token("twitch", "bot", new_token, expires_in)
+        logger.info(f"✅ Token BOT actualizado (expira en {expires_in//60}m)")
 
     def update_broadcaster_token(self, new_token: str, expires_in: int):
         self.BROADCASTER_TOKEN = new_token
         TokenRepository.update_access_token("twitch", "broadcaster", new_token, expires_in)
+        logger.info(f"✅ Token BROADCASTER actualizado (expira en {expires_in//60}m)")
+        # AHORA SÍ, sincronizar moderador con el nuevo token
+        self._sync_moderator_token(new_token, expires_in)
+
+    def _sync_moderator_token(self, new_token: str, expires_in: int):
+        """Sincroniza el token de moderador con el de broadcaster."""
+        self.MODERATOR_ACCESS_TOKEN = new_token
+        TokenRepository.update_access_token("twitch", "moderator", new_token, expires_in)
+        logger.info(f"✅ Token MODERATOR sincronizado con BROADCASTER (expira en {expires_in//60}m)")
 
     def update_app_token(self, new_token: str, expires_in: int = 5184000):
         self.APP_ACCESS_TOKEN = new_token
         TokenRepository.update_access_token("twitch", "app", new_token, expires_in)
+        logger.info(f"✅ Token APP actualizado (expira en {expires_in//3600}h)")
 
     def update_bot_refresh_token(self, new_refresh: str):
         self.BOT_REFRESH_TOKEN = new_refresh
         TokenRepository.update_refresh_token("twitch", "bot", new_refresh)
+        logger.info("✅ Refresh token BOT actualizado")
 
     def update_broadcaster_refresh_token(self, new_refresh: str):
         self.BROADCASTER_REFRESH_TOKEN = new_refresh
         TokenRepository.update_refresh_token("twitch", "broadcaster", new_refresh)
+        logger.info("✅ Refresh token BROADCASTER actualizado")
+        # Sincronizar también el refresh de moderador
+        self._sync_moderator_refresh_token(new_refresh)
+
+    def _sync_moderator_refresh_token(self, new_refresh: str):
+        self.MODERATOR_REFRESH_TOKEN = new_refresh
+        TokenRepository.update_refresh_token("twitch", "moderator", new_refresh)
+        logger.info("✅ Refresh token MODERATOR sincronizado con BROADCASTER")
 
     def update_spotify_refresh_token(self, new_refresh: str):
         self.SPOTIFY_REFRESH_TOKEN = new_refresh
         TokenRepository.update_refresh_token("spotify", "default", new_refresh)
+        logger.info("✅ Refresh token SPOTIFY actualizado")
 
     def _validate(self):
         required = {

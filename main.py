@@ -17,6 +17,7 @@ import signal
 import threading
 import time
 import asyncio
+import requests  # Añadido para verificar webhook
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -24,9 +25,9 @@ from bot.client import Bot
 from web.dashboard import run_dashboard, set_bot_instance, wait_for_tokens
 from utils.logger import setup_logger
 from services.token_manager import token_manager
-from services.config_service import config_service
 from services.log_service import log_service
-from config import settings  # <--- IMPORTAR SETTINGS
+from services.eventsub_service import eventsub_service
+from config import settings
 
 logger = setup_logger()
 
@@ -42,6 +43,7 @@ def signal_handler(sig, frame):
 
 
 def start_dashboard():
+    """Inicia el dashboard en un hilo separado."""
     max_wait = 60
     waited = 0
     while not hasattr(sys.modules['__main__'], 'bot_instance') and waited < max_wait:
@@ -87,20 +89,41 @@ def main():
         logger.info("✅ Event loop creado y establecido para el hilo principal")
         log_service.add_log('info', 'Event loop creado para el hilo principal', 'main')
 
-    # ===== USAR SETTINGS EN VEZ DE CONFIG_SERVICE =====
     logger.info(f"📺 Canal: {settings.CHANNEL}")
     logger.info(f"🤖 Bot: {settings.BOT_NICK}")
 
+    # ===== INICIAR DASHBOARD (CONTINE EL WEBHOOK) =====
     dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
     dashboard_thread.start()
 
+    # Esperar a que el dashboard esté listo (más robusto)
+    logger.info("⏳ Esperando que el dashboard (webhook) esté listo...")
+    webhook_ready = False
+    port = os.getenv("PORT", "10000")
+    for attempt in range(1, 31):  # hasta 30 intentos (30 segundos)
+        try:
+            url = f"http://localhost:{port}/webhook/twitch"
+            resp = requests.get(url, timeout=2)
+            if resp.status_code == 200:
+                webhook_ready = True
+                logger.info("✅ Webhook está activo")
+                break
+        except:
+            pass
+        time.sleep(1)
+        if attempt % 5 == 0:
+            logger.info(f"⏳ Intentando conectar al webhook... ({attempt}s)")
+
+    if not webhook_ready:
+        logger.warning("⚠️ Webhook no disponible después de 30s, continuando de todos modos...")
+
+    # ===== CREAR Y EJECUTAR EL BOT =====
     try:
         bot = Bot()
         bot_instance = bot
         set_bot_instance(bot)
         log_service.add_log('info', 'Bot creado y registrado en el dashboard', 'main')
 
-        # SEPARADOR ANTES DE CONEXIÓN
         logger.info("=" * 60)
         logger.info("🔮 Conectando al canal de Twitch...")
         logger.info("=" * 60)

@@ -1,5 +1,6 @@
 """
 Dashboard de configuración para el bot de Twitch
+Incluye el servidor webhook para EventSub
 Se ejecuta en el mismo proceso que el bot
 """
 
@@ -10,9 +11,15 @@ import time
 import hmac
 import hashlib
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from datetime import datetime, timedelta, timezone
+from collections import deque
+
+from flask import (
+    Flask, render_template, request, jsonify, session,
+    redirect, url_for, Response, abort
+)
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from datetime import timedelta, datetime
+from werkzeug.exceptions import BadRequest, Unauthorized, UnsupportedMediaType
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -25,6 +32,7 @@ from services.link_manager import link_manager
 from services.log_service import log_service
 from services.warning_manager import warning_manager
 from services.token_manager import token_manager
+from services.eventsub_service import eventsub_service
 from exceptions import TwitchAPIError, AuthenticationError
 
 logger = get_logger(__name__)
@@ -32,11 +40,22 @@ logger = get_logger(__name__)
 app = Flask(__name__)
 app.secret_key = os.getenv("DASHBOARD_SECRET_KEY", "supersecretkey_change_me")
 app.permanent_session_lifetime = timedelta(hours=1)
+app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB
 
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = 'Por favor inicia sesión'
+
+# ============================================
+# CONSTANTES DE SEGURIDAD PARA WEBHOOK
+# ============================================
+MAX_MESSAGE_AGE_SECONDS = 600  # 10 minutos
+CACHE_SIZE = 1000
+TWITCH_SECRET = os.getenv("TWITCH_WEBHOOK_SECRET", "")
+
+if not TWITCH_SECRET:
+    logger.warning("⚠️ TWITCH_WEBHOOK_SECRET no configurado. Las solicitudes serán rechazadas.")
 
 
 class User(UserMixin):
@@ -58,7 +77,7 @@ _tokens_ready = False
 _spotify_cache = {
     'data': None,
     'timestamp': 0,
-    'ttl': 10  # segundos
+    'ttl': 15  # segundos
 }
 
 
@@ -122,7 +141,91 @@ def get_cached_spotify_data(force_refresh=False):
 
 
 # ============================================
-# RUTAS DE PÁGINAS
+# FUNCIÓN HELPER PARA LLAMADAS ASÍNCRONAS
+# ============================================
+
+def call_twitch_api_async(coro, *args, **kwargs):
+    """Ejecuta una corrutina usando el loop del bot o crea uno temporal."""
+    if _bot_instance and hasattr(_bot_instance, 'loop') and _bot_instance.loop:
+        future = asyncio.run_coroutine_threadsafe(coro(*args, **kwargs), _bot_instance.loop)
+        try:
+            return future.result(timeout=30)
+        except asyncio.TimeoutError:
+            logger.error("Timeout ejecutando corrutina asíncrona")
+            return None
+        except Exception as e:
+            logger.error(f"Error ejecutando corrutina: {e}", exc_info=True)
+            return None
+    else:
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result = loop.run_until_complete(coro(*args, **kwargs))
+            loop.close()
+            return result
+        except Exception as e:
+            logger.error(f"Error en loop temporal: {e}", exc_info=True)
+            return None
+
+
+# ============================================
+# FUNCIONES DE VALIDACIÓN PARA WEBHOOK
+# ============================================
+
+class MessageIdCache:
+    """Cache para deduplicación de IDs de mensajes (O(1) consulta, deque para expulsión)."""
+    def __init__(self, maxlen: int = CACHE_SIZE):
+        self._maxlen = maxlen
+        self._deque = deque(maxlen=maxlen)
+        self._set = set()
+
+    def add(self, message_id: str) -> bool:
+        if message_id in self._set:
+            return False
+        if len(self._deque) == self._maxlen:
+            oldest = self._deque[0]
+            self._set.discard(oldest)
+        self._deque.append(message_id)
+        self._set.add(message_id)
+        return True
+
+
+_message_cache = MessageIdCache()
+
+
+def verify_signature(message: str, signature: str, secret: str) -> bool:
+    if not secret:
+        logger.warning("⚠️ TWITCH_WEBHOOK_SECRET vacío, omitiendo verificación")
+        return True
+    expected = hmac.new(
+        secret.encode('utf-8'),
+        message.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    if signature.startswith('sha256='):
+        signature = signature[7:]
+    return hmac.compare_digest(expected, signature)
+
+
+def is_timestamp_fresh(timestamp_str: str) -> bool:
+    try:
+        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        now = datetime.now(timezone.utc)
+        age = (now - dt).total_seconds()
+        if age < 0:
+            logger.warning(f"Timestamp futuro: {timestamp_str}")
+            return False
+        if age > MAX_MESSAGE_AGE_SECONDS:
+            logger.warning(f"Mensaje demasiado antiguo: {age:.0f}s")
+            return False
+        return True
+    except ValueError as e:
+        logger.error(f"Error parseando timestamp: {e}")
+        return False
+
+
+# ============================================
+# RUTAS DE PÁGINAS (dashboard)
 # ============================================
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -268,47 +371,19 @@ def api_dashboard_data():
             'last_subscriber': 'Esperando...'
         }
         
-        # --- Obtener estado del stream ---
-        def fetch_stream_info(retry=True):
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                stream_info = loop.run_until_complete(stats_service.get_stream_info())
-                loop.close()
-                return stream_info
-            except AuthenticationError:
-                if retry:
-                    logger.warning("🔑 Token del streamer expirado, intentando refrescar...")
-                    if token_manager.force_refresh_broadcaster_if_needed():
-                        return fetch_stream_info(retry=False)
-                raise
-            except Exception as e:
-                logger.debug(f"Stream info no disponible: {e}")
-                return None
-        
-        stream_info = fetch_stream_info()
-        
-        def fetch_channel_info(retry=True):
+        # --- Obtener estado del stream usando helper ---
+        stream_info = call_twitch_api_async(stats_service.get_stream_info)
+        channel_info = None
+        if stream_info is None:
             try:
                 channel_result = api.get(
                     "channels",
                     params={"broadcaster_id": stats_service.broadcaster_id}
                 )
                 if channel_result and "data" in channel_result and channel_result["data"]:
-                    return channel_result["data"][0]
-                return None
-            except AuthenticationError:
-                if retry:
-                    logger.warning("🔑 Token del streamer expirado al obtener canal, intentando refrescar...")
-                    if token_manager.force_refresh_broadcaster_if_needed():
-                        return fetch_channel_info(retry=False)
-                raise
+                    channel_info = channel_result["data"][0]
             except Exception as e:
-                logger.error(f"Error obteniendo canal info: {e}")
-                log_service.add_log('error', f'Error obteniendo info del canal: {e}', 'twitch_api')
-                return None
-        
-        channel_info = fetch_channel_info()
+                logger.debug(f"No se pudo obtener channel_info: {e}")
         
         if stream_info:
             data['status']['live'] = True
@@ -329,11 +404,15 @@ def api_dashboard_data():
                 data['status']['uptime'] = "En vivo"
         else:
             data['status']['live'] = False
-            data['status']['title'] = channel_info.get("title", "Sin título") if channel_info else "Sin título"
-            data['status']['game'] = channel_info.get("game_name", "No especificado") if channel_info else "No especificado"
+            if channel_info:
+                data['status']['title'] = channel_info.get("title", "Sin título")
+                data['status']['game'] = channel_info.get("game_name", "No especificado")
+            else:
+                data['status']['title'] = "Sin título"
+                data['status']['game'] = "No especificado"
             data['status']['uptime'] = "Offline"
         
-        # --- Estadísticas ---
+        # --- Estadísticas con manejo de errores ---
         def safe_api_call(func, *args, **kwargs):
             try:
                 return func(*args, **kwargs)
@@ -343,7 +422,7 @@ def api_dashboard_data():
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    logger.error(f"Error en llamada API después de refrescar: {e}")
+                    logger.error(f"Error en llamada API después de refrescar: {e}", exc_info=True)
                     return None
             except Exception as e:
                 logger.debug(f"Error en llamada API: {e}")
@@ -357,7 +436,6 @@ def api_dashboard_data():
         if followers_result and "total" in followers_result:
             data['stats']['followers'] = followers_result["total"]
         
-        # Último seguidor
         followers_result = safe_api_call(
             api.get, "channels/followers",
             params={"broadcaster_id": stats_service.broadcaster_id, "first": 1}
@@ -374,7 +452,6 @@ def api_dashboard_data():
         if subscribers_result and "total" in subscribers_result:
             data['stats']['subscribers'] = subscribers_result["total"]
         
-        # Último suscriptor
         subscribers_result = safe_api_call(
             api.get, "subscriptions",
             params={"broadcaster_id": stats_service.broadcaster_id, "first": 1}
@@ -402,16 +479,16 @@ def api_dashboard_data():
                 total_bits = sum(item.get('score', 0) for item in cheers_result["data"])
                 data['stats']['cheers'] = total_bits
         
-        # Comandos personalizados
+        # Comandos personalizados y palabras prohibidas
         data['stats']['commands'] = len(config_service.get_custom_commands())
         data['stats']['banned_words'] = len(config_service.get_banned_words())
         
-        # --- Spotify (con caché) ---
+        # Spotify (caché)
         spotify_cache = get_cached_spotify_data(force_refresh=force_refresh)
         data['spotify'] = spotify_cache
         data['stats']['spotify_tracks'] = len(spotify_cache.get('queue', []))
         
-        # --- Moderación ---
+        # Moderación
         try:
             twitch_banned = link_manager.get_twitch_banned_users()
             for user in twitch_banned:
@@ -422,7 +499,7 @@ def api_dashboard_data():
                         'reason': user.get('reason', 'No especificada')
                     })
         except Exception as e:
-            logger.error(f"Error obteniendo baneados de Twitch: {e}")
+            logger.error(f"Error obteniendo baneados de Twitch: {e}", exc_info=True)
             log_service.add_log('error', f'Error obteniendo baneados de Twitch: {e}', 'twitch_api')
         
         try:
@@ -436,10 +513,10 @@ def api_dashboard_data():
                     'remaining_formatted': link_manager._format_remaining(user.get('remaining_seconds', 0))
                 })
         except Exception as e:
-            logger.error(f"Error obteniendo timeouts de Twitch: {e}")
+            logger.error(f"Error obteniendo timeouts de Twitch: {e}", exc_info=True)
             log_service.add_log('error', f'Error obteniendo timeouts de Twitch: {e}', 'twitch_api')
         
-        # Todas las advertencias (warning_manager)
+        # Advertencias
         try:
             all_warnings = warning_manager.get_all_warnings_summary()
             for user_id, warn_data in all_warnings.items():
@@ -466,7 +543,7 @@ def api_dashboard_data():
                     'detail': type_details
                 })
         except Exception as e:
-            logger.error(f"Error obteniendo todas las advertencias: {e}")
+            logger.error(f"Error obteniendo todas las advertencias: {e}", exc_info=True)
             log_service.add_log('error', f'Error obteniendo todas las advertencias: {e}', 'twitch_api')
         
         # Baneados y timeouts del bot (link_manager)
@@ -480,7 +557,7 @@ def api_dashboard_data():
                     'banned_at': ban_data.get('banned_at', '')
                 })
         except Exception as e:
-            logger.error(f"Error obteniendo baneados del bot: {e}")
+            logger.error(f"Error obteniendo baneados del bot: {e}", exc_info=True)
             log_service.add_log('error', f'Error obteniendo baneados del bot: {e}', 'twitch_api')
         
         try:
@@ -493,10 +570,10 @@ def api_dashboard_data():
                     'remaining_formatted': timeout_data.get('remaining_formatted', '0s')
                 })
         except Exception as e:
-            logger.error(f"Error obteniendo timeouts del bot: {e}")
+            logger.error(f"Error obteniendo timeouts del bot: {e}", exc_info=True)
             log_service.add_log('error', f'Error obteniendo timeouts del bot: {e}', 'twitch_api')
         
-        # --- Configuración ---
+        # Configuración
         data['settings']['slow_mode'] = config_service.get_slow_mode()
         data['settings']['follower_mode'] = config_service.get_follower_mode()
         data['settings']['emote_mode'] = config_service.get_emote_mode()
@@ -504,7 +581,7 @@ def api_dashboard_data():
         data['settings']['max_warnings'] = config_service.get_max_warnings()
         data['settings']['banned_words'] = config_service.get_banned_words()
         
-        # --- Enlaces sociales ---
+        # Enlaces sociales
         data['social_links'] = {
             'discord': config_service.get_social_link('discord'),
             'twitter': config_service.get_social_link('twitter'),
@@ -513,7 +590,7 @@ def api_dashboard_data():
             'tiktok': config_service.get_social_link('tiktok')
         }
         
-        # --- Historial de estadísticas ---
+        # Historial de estadísticas
         try:
             config_service.add_stats_snapshot(
                 data['stats']['followers'],
@@ -529,10 +606,10 @@ def api_dashboard_data():
         return jsonify(data)
         
     except Exception as e:
-        logger.error(f"Error en /api/dashboard-data: {e}")
+        logger.error(f"Error en /api/dashboard-data: {e}", exc_info=True)
         log_service.add_log('critical', f'Error crítico en /api/dashboard-data: {e}', 'dashboard')
         return jsonify({
-            'error': str(e),
+            'error': 'Error interno al obtener datos',
             'timestamp': datetime.now().isoformat(),
             'status': {'connected': False, 'live': False, 'viewers': 0, 'game': 'Error', 'title': 'Error', 'uptime': 'Error'},
             'stats': {'followers': 0, 'subscribers': 0, 'commands': 0, 'banned_words': 0, 'spotify_tracks': 0, 'cheers': 0},
@@ -547,12 +624,175 @@ def api_dashboard_data():
 
 
 # ============================================
-# ENDPOINTS DE WARNINGS
+# WEBHOOK DE TWITCH (EVENTSUB)
+# ============================================
+
+@app.route('/webhook/twitch', methods=['POST'])
+def twitch_webhook():
+    """Endpoint principal para webhooks de Twitch (EventSub)."""
+    start_time = time.time()
+
+    # Validar Content-Type
+    if request.content_type != 'application/json':
+        abort(415, description="Content-Type debe ser application/json")
+
+    # Obtener headers
+    signature = request.headers.get('Twitch-Eventsub-Message-Signature', '')
+    message_id = request.headers.get('Twitch-Eventsub-Message-Id', '')
+    timestamp = request.headers.get('Twitch-Eventsub-Message-Timestamp', '')
+    message_type = request.headers.get('Twitch-Eventsub-Message-Type', '')
+
+    if not message_id or not timestamp or not signature:
+        logger.warning("Faltan headers de EventSub")
+        abort(400, description="Faltan headers requeridos")
+
+    raw_body = request.get_data(as_text=True)
+
+    # Validar timestamp (replay attack)
+    if not is_timestamp_fresh(timestamp):
+        logger.warning(f"Mensaje rechazado por timestamp inválido: {timestamp}")
+        abort(400, description="Timestamp inválido o expirado")
+
+    # Construir mensaje para firma
+    verification_message = message_id + timestamp + raw_body
+
+    # Verificar firma
+    if not verify_signature(verification_message, signature, TWITCH_SECRET):
+        logger.warning(f"Firma inválida para mensaje {message_id}")
+        abort(401, description="Firma HMAC inválida")
+
+    # Deduplicación
+    if not _message_cache.add(message_id):
+        logger.info(f"⏩ Mensaje duplicado ignorado: {message_id}")
+        return jsonify({"status": "duplicate"}), 200
+
+    # Parsear JSON
+    try:
+        data = request.json
+    except Exception as e:
+        logger.error(f"Error parseando JSON: {e}")
+        abort(400, description="JSON inválido")
+
+    # Manejar según tipo de mensaje
+    if message_type == 'webhook_callback_verification':
+        challenge = data.get('challenge')
+        if not challenge:
+            abort(400, description="Falta challenge en verificación")
+        logger.info(f"✅ Verificando webhook con challenge: {challenge[:20]}...")
+        return Response(challenge, status=200, mimetype='text/plain')
+
+    elif message_type == 'notification':
+        event_type = data.get('subscription', {}).get('type', 'unknown')
+        event_data = data.get('event', {})
+        logger.info(f"📨 Evento {event_type} recibido (ID: {message_id})")
+
+        # Procesar evento directamente (el bot está en el mismo proceso)
+        if _bot_instance:
+            eventsub_service.set_bot(_bot_instance)
+            eventsub_service.process_webhook(message_id, event_type, event_data)
+        else:
+            logger.warning("Bot no disponible para procesar evento")
+            log_service.add_log('info', f'Evento recibido sin bot: {event_type}', 'webhook')
+
+        return jsonify({"status": "ok"}), 200
+
+    elif message_type == 'revocation':
+        subscription = data.get('subscription', {})
+        event_type = subscription.get('type', 'unknown')
+        reason = data.get('reason', 'No especificado')
+        logger.warning(f"🔄 Revocación de suscripción: {event_type} - Motivo: {reason}")
+        log_service.add_log('warning', f'Revocación de {event_type}: {reason}', 'webhook')
+        return jsonify({"status": "revoked"}), 200
+
+    else:
+        logger.warning(f"Tipo de mensaje desconocido: {message_type}")
+        abort(400, description="Tipo de mensaje no soportado")
+
+
+@app.route('/webhook/twitch', methods=['GET'])
+def twitch_webhook_get():
+    """Método GET para verificación inicial."""
+    return jsonify({"status": "ready"}), 200
+
+
+# ============================================
+# ERROR HANDLERS
+# ============================================
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({"error": "Bad Request", "description": str(e.description)}), 400
+
+
+@app.errorhandler(401)
+def unauthorized(e):
+    return jsonify({"error": "Unauthorized", "description": str(e.description)}), 401
+
+
+@app.errorhandler(415)
+def unsupported_media(e):
+    return jsonify({"error": "Unsupported Media Type", "description": str(e.description)}), 415
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    logger.error(f"Error interno: {e}")
+    return jsonify({"error": "Internal Server Error"}), 500
+
+
+# ============================================
+# ENDPOINTS ADICIONALES
+# ============================================
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check completo."""
+    bot_status = "unknown"
+    try:
+        if _bot_instance:
+            bot_status = "connected"
+        else:
+            bot_status = "not_initialized"
+    except:
+        bot_status = "error"
+
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.0",
+        "bot_status": bot_status,
+        "twitch_secret_configured": bool(TWITCH_SECRET),
+        "cache_size": len(_message_cache._set),
+        "uptime_seconds": int((datetime.now() - app.config.get('START_TIME', datetime.now())).total_seconds())
+    }), 200
+
+
+@app.route('/', methods=['GET'])
+def index_root():
+    """Raíz del servicio (no el dashboard autenticado)."""
+    return jsonify({
+        "service": "VesperBot Dashboard + EventSub",
+        "status": "running",
+        "version": "2.0",
+        "endpoints": {
+            "webhook": "/webhook/twitch",
+            "health": "/health",
+            "dashboard": "/"
+        },
+        "documentation": "https://dev.twitch.tv/docs/eventsub"
+    }), 200
+
+
+# ============================================
+# ENDPOINTS DE WARNINGS (continuación)
 # ============================================
 
 @app.route('/api/warnings/<user_id>', methods=['DELETE'])
 @login_required
 def api_delete_warnings(user_id):
+    if not user_id or not user_id.strip():
+        return jsonify({'success': False, 'error': 'ID de usuario inválido'}), 400
+    
     try:
         data = request.json or {}
         warning_type = data.get('type')
@@ -620,16 +860,19 @@ def api_delete_warnings(user_id):
                 'message': f'Todas las advertencias eliminadas ({total})'
             })
     except Exception as e:
-        logger.error(f"Error eliminando advertencias: {e}")
+        logger.error(f"Error eliminando advertencias: {e}", exc_info=True)
         log_service.add_log('error', f'Error eliminando advertencias: {e}', 'dashboard')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Error interno'}), 500
 
 
 @app.route('/api/link/warnings/<user_id>', methods=['DELETE'])
 @login_required
 def api_clear_link_warnings(user_id):
+    if not user_id or not user_id.strip():
+        return jsonify({'success': False, 'error': 'ID de usuario inválido'}), 400
+    
     try:
-        data = request.json
+        data = request.json or {}
         count = data.get('count', 0)
         user_name = data.get('user_name', user_id)
         
@@ -657,12 +900,13 @@ def api_clear_link_warnings(user_id):
             )
             return jsonify({'message': f'Advertencias reducidas a {new_count}', 'success': True})
     except Exception as e:
+        logger.error(f"Error limpiando advertencias de enlaces: {e}", exc_info=True)
         log_service.add_log('error', f'Error limpiando advertencias de enlaces: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Error interno'}), 500
 
 
 # ============================================
-# ENDPOINTS DE SPOTIFY
+# ENDPOINTS DE SPOTIFY (continuación)
 # ============================================
 
 @app.route('/api/spotify/queue')
@@ -672,7 +916,7 @@ def api_get_queue():
         spotify_data = get_cached_spotify_data(force_refresh=False)
         return jsonify(spotify_data)
     except Exception as e:
-        logger.error(f"Error en /api/spotify/queue: {e}")
+        logger.error(f"Error en /api/spotify/queue: {e}", exc_info=True)
         log_service.add_log('error', f'Error obteniendo cola de Spotify: {e}', 'spotify')
         return jsonify({
             'current': None,
@@ -696,7 +940,7 @@ def api_spotify_track_art(track_id):
             return jsonify({'album_art': album_art})
         return jsonify({'album_art': ''})
     except Exception as e:
-        logger.error(f"Error obteniendo portada del álbum: {e}")
+        logger.error(f"Error obteniendo portada del álbum: {e}", exc_info=True)
         log_service.add_log('error', f'Error obteniendo portada del álbum: {e}', 'spotify')
         return jsonify({'album_art': ''})
 
@@ -735,9 +979,9 @@ def api_spotify_control():
             log_service.add_log('warning', f'Acción de Spotify falló: {action}', 'spotify')
         return jsonify({'message': 'Comando ejecutado', 'success': success})
     except Exception as e:
-        logger.error(f"Error en /api/spotify/control: {e}")
+        logger.error(f"Error en /api/spotify/control: {e}", exc_info=True)
         log_service.add_log('error', f'Error controlando Spotify: {e}', 'spotify')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/spotify/search')
@@ -763,6 +1007,7 @@ def api_spotify_search():
             })
         return jsonify(results_list)
     except Exception as e:
+        logger.error(f"Error buscando en Spotify: {e}", exc_info=True)
         log_service.add_log('error', f'Error buscando en Spotify: {e}', 'spotify')
         return jsonify([])
 
@@ -797,8 +1042,9 @@ def api_spotify_add():
             log_service.add_log('warning', f'No se pudo añadir canción a la cola: {track_id}', 'spotify')
         return jsonify({'message': 'Canción añadida a la cola', 'success': success})
     except Exception as e:
+        logger.error(f"Error añadiendo canción a cola: {e}", exc_info=True)
         log_service.add_log('error', f'Error añadiendo canción a cola: {e}', 'spotify')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/spotify/remove', methods=['POST'])
@@ -821,9 +1067,9 @@ def api_spotify_remove():
         else:
             return jsonify({'success': False, 'error': 'No se encontró la canción'}), 404
     except Exception as e:
-        logger.error(f"Error eliminando de cola: {e}")
+        logger.error(f"Error eliminando de cola: {e}", exc_info=True)
         log_service.add_log('error', f'Error eliminando de cola: {e}', 'spotify')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Error interno'}), 500
 
 
 @app.route('/api/spotify/clearqueue', methods=['POST'])
@@ -836,9 +1082,9 @@ def api_spotify_clear_queue():
             _spotify_cache['timestamp'] = 0
         return jsonify({'success': True, 'message': f'Se eliminaron {count} canciones de la cola'})
     except Exception as e:
-        logger.error(f"Error limpiando cola: {e}")
+        logger.error(f"Error limpiando cola: {e}", exc_info=True)
         log_service.add_log('error', f'Error limpiando cola: {e}', 'spotify')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Error interno'}), 500
 
 
 # ============================================
@@ -848,10 +1094,6 @@ def api_spotify_clear_queue():
 @app.route('/api/logs')
 @login_required
 def api_get_logs():
-    """
-    Devuelve logs del sistema (excluye moderation y stats por defecto).
-    Si se especifica source, devuelve solo esa fuente.
-    """
     try:
         limit = int(request.args.get('limit', 100))
         level = request.args.get('level', None)
@@ -859,22 +1101,17 @@ def api_get_logs():
         
         all_logs = list(log_service.logs)
         
-        # Si no se especifica source, excluir moderation y stats (solo sistema)
         if not source:
             all_logs = [log for log in all_logs if log.get('source') not in ('moderation', 'stats')]
         else:
             all_logs = [log for log in all_logs if log.get('source') == source]
         
-        # Aplicar filtro de nivel
         if level:
             all_logs = [log for log in all_logs if log.get('level') == level.upper()]
         
-        # Ordenar por timestamp descendente (más reciente primero)
         all_logs = sorted(all_logs, key=lambda x: x['timestamp'], reverse=True)
         
-        # Obtener fuentes disponibles (excluyendo moderation y stats para el selector)
         sources = sorted(set([l.get('source', 'unknown') for l in all_logs]))
-        # Asegurar que no se filtren sources no deseados en el selector
         sources = [s for s in sources if s not in ('moderation', 'stats')]
         
         return jsonify({
@@ -883,52 +1120,43 @@ def api_get_logs():
             'levels': ['INFO', 'WARNING', 'ERROR', 'CRITICAL']
         })
     except Exception as e:
-        logger.error(f"Error obteniendo logs: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error obteniendo logs: {e}", exc_info=True)
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/logs/clear', methods=['POST'])
 @login_required
 def api_clear_logs():
-    """
-    Limpia logs por categoría.
-    category: 'system', 'moderation', 'stats' o None (todos)
-    """
     try:
         from collections import deque
         data = request.json or {}
         category = data.get('category')
         
         if category == 'system':
-            # Eliminar todos los logs excepto moderation y stats
             new_logs = deque([log for log in log_service.logs if log.get('source') in ('moderation', 'stats')], maxlen=log_service.max_logs)
             log_service.logs = new_logs
             log_service.add_log('info', f'Logs del sistema limpiados por {current_user.username}', 'dashboard')
         elif category == 'moderation':
-            # Eliminar solo logs de moderación
             new_logs = deque([log for log in log_service.logs if log.get('source') != 'moderation'], maxlen=log_service.max_logs)
             log_service.logs = new_logs
             log_service.add_log('info', f'Logs de moderación limpiados por {current_user.username}', 'dashboard')
         elif category == 'stats':
-            # Eliminar solo logs de estadísticas
             new_logs = deque([log for log in log_service.logs if log.get('source') != 'stats'], maxlen=log_service.max_logs)
             log_service.logs = new_logs
             log_service.add_log('info', f'Logs de estadísticas limpiados por {current_user.username}', 'dashboard')
         else:
-            # Limpiar todos los logs (comportamiento por defecto)
             log_service.clear_logs()
             log_service.add_log('info', f'Todos los logs limpiados por {current_user.username}', 'dashboard')
         
         return jsonify({'success': True, 'message': 'Logs limpiados correctamente'})
     except Exception as e:
-        logger.error(f"Error limpiando logs: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error limpiando logs: {e}", exc_info=True)
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/logs/moderation')
 @login_required
 def api_get_moderation_logs():
-    """Devuelve logs filtrados por fuente de moderación."""
     try:
         limit = int(request.args.get('limit', 100))
         all_logs = list(log_service.logs)
@@ -936,14 +1164,13 @@ def api_get_moderation_logs():
         mod_logs = sorted(mod_logs, key=lambda x: x['timestamp'], reverse=True)
         return jsonify({'logs': mod_logs[:limit]})
     except Exception as e:
-        logger.error(f"Error obteniendo logs de moderación: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error obteniendo logs de moderación: {e}", exc_info=True)
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/logs/stats')
 @login_required
 def api_get_stats_logs():
-    """Devuelve logs filtrados por fuente de estadísticas (follows, subs, raids, etc.)."""
     try:
         limit = int(request.args.get('limit', 100))
         all_logs = list(log_service.logs)
@@ -951,8 +1178,8 @@ def api_get_stats_logs():
         stats_logs = sorted(stats_logs, key=lambda x: x['timestamp'], reverse=True)
         return jsonify({'logs': stats_logs[:limit]})
     except Exception as e:
-        logger.error(f"Error obteniendo logs de estadísticas: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error obteniendo logs de estadísticas: {e}", exc_info=True)
+        return jsonify({'error': 'Error interno'}), 500
 
 
 # ============================================
@@ -963,7 +1190,7 @@ def api_get_stats_logs():
 @login_required
 def api_status():
     try:
-        data = api_dashboard_data().json
+        data = api_dashboard_data().get_json()
         return jsonify({
             'connected': data.get('status', {}).get('connected', True),
             'live': data.get('status', {}).get('live', False),
@@ -979,7 +1206,7 @@ def api_status():
             'cheers': data.get('stats', {}).get('cheers', 0)
         })
     except Exception as e:
-        logger.error(f"Error en /api/status: {e}")
+        logger.error(f"Error en /api/status: {e}", exc_info=True)
         log_service.add_log('error', f'Error en /api/status: {e}', 'dashboard')
         return jsonify({
             'connected': False,
@@ -1012,7 +1239,7 @@ def api_get_commands():
             })
         return jsonify(command_list)
     except Exception as e:
-        logger.error(f"Error en /api/commands: {e}")
+        logger.error(f"Error en /api/commands: {e}", exc_info=True)
         log_service.add_log('error', f'Error obteniendo comandos: {e}', 'dashboard')
         return jsonify([])
 
@@ -1041,9 +1268,9 @@ def api_add_command():
         else:
             return jsonify({'error': 'Error al crear el comando'}), 500
     except Exception as e:
-        logger.error(f"Error en /api/commands POST: {e}")
+        logger.error(f"Error en /api/commands POST: {e}", exc_info=True)
         log_service.add_log('error', f'Error creando comando: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/commands/<name>', methods=['DELETE'])
@@ -1057,9 +1284,9 @@ def api_delete_command(name):
         else:
             return jsonify({'error': 'Comando no encontrado'}), 404
     except Exception as e:
-        logger.error(f"Error en /api/commands DELETE: {e}")
+        logger.error(f"Error en /api/commands DELETE: {e}", exc_info=True)
         log_service.add_log('error', f'Error eliminando comando: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/settings/social')
@@ -1074,6 +1301,7 @@ def api_get_social_links():
             'tiktok': config_service.get_social_link('tiktok')
         })
     except Exception as e:
+        logger.error(f"Error obteniendo enlaces sociales: {e}", exc_info=True)
         log_service.add_log('error', f'Error obteniendo enlaces sociales: {e}', 'dashboard')
         return jsonify({})
 
@@ -1092,8 +1320,9 @@ def api_set_social_links():
             log_service.add_log('info', f'Enlace social {platform} actualizado por {current_user.username}', 'dashboard')
         return jsonify({'message': f'Enlace de {platform} actualizado', 'success': success})
     except Exception as e:
+        logger.error(f"Error actualizando enlace social: {e}", exc_info=True)
         log_service.add_log('error', f'Error actualizando enlace social: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/settings/bot-icon', methods=['GET'])
@@ -1102,7 +1331,7 @@ def api_get_bot_icon():
     try:
         icon = config_service.get('bot_icon', '🕯️')
         return jsonify({'icon': icon})
-    except Exception as e:
+    except Exception:
         return jsonify({'icon': '🕯️'})
 
 
@@ -1114,14 +1343,10 @@ def api_set_bot_icon():
         icon = data.get('icon', '').strip()
         if not icon:
             return jsonify({'success': False, 'error': 'El icono no puede estar vacío'}), 400
-
-        # Permitir imágenes sin límite de longitud
         if not icon.startswith('data:image') and len(icon) > 10:
             return jsonify({'success': False, 'error': 'El icono es demasiado largo'}), 400
-
         success = config_service.set('bot_icon', icon)
         if success:
-            # Truncar el icono si es una imagen Base64 para no saturar los logs
             if icon.startswith('data:image'):
                 log_message = 'Icono del bot actualizado (imagen)'
             else:
@@ -1131,9 +1356,9 @@ def api_set_bot_icon():
         else:
             return jsonify({'success': False, 'error': 'Error al guardar el icono'}), 500
     except Exception as e:
-        logger.error(f"Error guardando icono: {e}")
+        logger.error(f"Error guardando icono: {e}", exc_info=True)
         log_service.add_log('error', f'Error guardando icono: {e}', 'dashboard')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Error interno'}), 500
 
 
 @app.route('/api/moderation/banned_words')
@@ -1141,7 +1366,7 @@ def api_set_bot_icon():
 def api_get_banned_words():
     try:
         return jsonify(config_service.get_banned_words())
-    except Exception as e:
+    except Exception:
         return jsonify([])
 
 
@@ -1160,8 +1385,9 @@ def api_add_banned_word():
         else:
             return jsonify({'error': 'Palabra ya existe'}), 400
     except Exception as e:
+        logger.error(f"Error añadiendo palabra prohibida: {e}", exc_info=True)
         log_service.add_log('error', f'Error añadiendo palabra prohibida: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/moderation/banned_words/<word>', methods=['DELETE'])
@@ -1175,8 +1401,9 @@ def api_delete_banned_word(word):
         else:
             return jsonify({'error': 'Palabra no encontrada'}), 404
     except Exception as e:
+        logger.error(f"Error eliminando palabra prohibida: {e}", exc_info=True)
         log_service.add_log('error', f'Error eliminando palabra prohibida: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/moderation/banned_words/reload', methods=['POST'])
@@ -1191,8 +1418,9 @@ def api_reload_banned_words():
             'message': f'Palabras prohibidas recargadas: {len(anti_spam.banned_words)}'
         })
     except Exception as e:
+        logger.error(f"Error recargando palabras prohibidas: {e}", exc_info=True)
         log_service.add_log('error', f'Error recargando palabras prohibidas: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/settings/password', methods=['POST'])
@@ -1214,8 +1442,9 @@ def api_change_password():
             log_service.add_log('info', f'Contraseña del dashboard actualizada por {current_user.username}', 'dashboard')
         return jsonify({'message': 'Contraseña actualizada', 'success': success})
     except Exception as e:
+        logger.error(f"Error cambiando contraseña: {e}", exc_info=True)
         log_service.add_log('error', f'Error cambiando contraseña: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 # ============================================
@@ -1234,19 +1463,16 @@ def api_update_stream_title():
             return jsonify({'success': False, 'error': 'El título no puede exceder 140 caracteres'}), 400
         from services.stream_manager import StreamManager
         stream_manager = StreamManager()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(stream_manager.update_title(title))
-        loop.close()
+        result = call_twitch_api_async(stream_manager.update_title, title)
         if result:
             log_service.add_log('info', f'Título del stream actualizado a "{title}" por {current_user.username}', 'moderation')
             return jsonify({'success': True, 'message': 'Título actualizado correctamente'})
         else:
             return jsonify({'success': False, 'error': 'No se pudo actualizar el título'}), 500
     except Exception as e:
-        logger.error(f"Error actualizando título: {e}")
+        logger.error(f"Error actualizando título: {e}", exc_info=True)
         log_service.add_log('error', f'Error actualizando título: {e}', 'dashboard')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Error interno'}), 500
 
 
 @app.route('/api/stream/game', methods=['POST'])
@@ -1260,39 +1486,34 @@ def api_update_stream_game():
         from services.stream_manager import StreamManager
         from exceptions import ResourceNotFoundError
         stream_manager = StreamManager()
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            game_id, actual_name = loop.run_until_complete(stream_manager.update_game(game_name))
-            loop.close()
-            log_service.add_log('info', f'Juego del stream actualizado a "{actual_name}" por {current_user.username}', 'moderation')
-            return jsonify({
-                'success': True,
-                'message': 'Juego actualizado correctamente',
-                'game_name': actual_name,
-                'game_id': game_id
-            })
+            result = call_twitch_api_async(stream_manager.update_game, game_name)
+            if result:
+                game_id, actual_name = result
+                log_service.add_log('info', f'Juego del stream actualizado a "{actual_name}" por {current_user.username}', 'moderation')
+                return jsonify({
+                    'success': True,
+                    'message': 'Juego actualizado correctamente',
+                    'game_name': actual_name,
+                    'game_id': game_id
+                })
+            else:
+                return jsonify({'success': False, 'error': 'No se pudo actualizar el juego'}), 500
         except ResourceNotFoundError:
-            loop.close()
             return jsonify({'success': False, 'error': f'No se encontró el juego: {game_name}'}), 404
         except Exception as e:
-            loop.close()
-            raise e
+            raise
     except Exception as e:
-        logger.error(f"Error actualizando juego: {e}")
+        logger.error(f"Error actualizando juego: {e}", exc_info=True)
         log_service.add_log('error', f'Error actualizando juego: {e}', 'dashboard')
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Error interno'}), 500
 
 
 @app.route('/api/stream/status')
 @login_required
 def api_stream_status():
     try:
-        from services.stats_service import stats_service
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        stream_info = loop.run_until_complete(stats_service.get_stream_info())
-        loop.close()
+        stream_info = call_twitch_api_async(stats_service.get_stream_info)
         if stream_info:
             return jsonify({
                 'live': True,
@@ -1325,9 +1546,9 @@ def api_stream_status():
                     'started_at': None
                 })
     except Exception as e:
-        logger.error(f"Error obteniendo estado del stream: {e}")
+        logger.error(f"Error obteniendo estado del stream: {e}", exc_info=True)
         log_service.add_log('error', f'Error obteniendo estado del stream: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 # ============================================
@@ -1347,8 +1568,9 @@ def api_get_moderation_settings():
             'banned_words': config_service.get_banned_words()
         })
     except Exception as e:
+        logger.error(f"Error obteniendo configuración de moderación: {e}", exc_info=True)
         log_service.add_log('error', f'Error obteniendo configuración de moderación: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/moderation/slow', methods=['POST'])
@@ -1368,15 +1590,16 @@ def api_set_slow_mode():
                     _bot_instance.loop
                 )
             except Exception as e:
-                logger.error(f"Error aplicando slow mode: {e}")
+                logger.error(f"Error aplicando slow mode: {e}", exc_info=True)
                 log_service.add_log('warning', f'Error aplicando modo lento en el bot: {e}', 'bot')
         if success:
             estado = "activado" if enabled else "desactivado"
             log_service.add_log('info', f'Modo lento {estado} ({seconds}s) por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
+        logger.error(f"Error configurando modo lento: {e}", exc_info=True)
         log_service.add_log('error', f'Error configurando modo lento: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/moderation/followers', methods=['POST'])
@@ -1396,15 +1619,16 @@ def api_set_follower_mode():
                     _bot_instance.loop
                 )
             except Exception as e:
-                logger.error(f"Error aplicando follower mode: {e}")
+                logger.error(f"Error aplicando follower mode: {e}", exc_info=True)
                 log_service.add_log('warning', f'Error aplicando modo seguidores en el bot: {e}', 'bot')
         if success:
             estado = "activado" if enabled else "desactivado"
             log_service.add_log('info', f'Modo seguidores {estado} ({minutes}m) por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
+        logger.error(f"Error configurando modo seguidores: {e}", exc_info=True)
         log_service.add_log('error', f'Error configurando modo seguidores: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/moderation/emote', methods=['POST'])
@@ -1421,15 +1645,16 @@ def api_set_emote_mode():
                     _bot_instance.loop
                 )
             except Exception as e:
-                logger.error(f"Error aplicando emote mode: {e}")
+                logger.error(f"Error aplicando emote mode: {e}", exc_info=True)
                 log_service.add_log('warning', f'Error aplicando modo emotes en el bot: {e}', 'bot')
         if success:
             estado = "activado" if enabled else "desactivado"
             log_service.add_log('info', f'Modo emotes {estado} por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
+        logger.error(f"Error configurando modo emotes: {e}", exc_info=True)
         log_service.add_log('error', f'Error configurando modo emotes: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/moderation/subscriber', methods=['POST'])
@@ -1446,15 +1671,16 @@ def api_set_subscriber_mode():
                     _bot_instance.loop
                 )
             except Exception as e:
-                logger.error(f"Error aplicando subscriber mode: {e}")
+                logger.error(f"Error aplicando subscriber mode: {e}", exc_info=True)
                 log_service.add_log('warning', f'Error aplicando modo suscriptores en el bot: {e}', 'bot')
         if success:
             estado = "activado" if enabled else "desactivado"
             log_service.add_log('info', f'Modo suscriptores {estado} por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
+        logger.error(f"Error configurando modo suscriptores: {e}", exc_info=True)
         log_service.add_log('error', f'Error configurando modo suscriptores: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/moderation/max_warnings', methods=['POST'])
@@ -1470,8 +1696,9 @@ def api_set_max_warnings():
             log_service.add_log('info', f'Máximo de advertencias actualizado a {value} por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
+        logger.error(f"Error actualizando máximo de advertencias: {e}", exc_info=True)
         log_service.add_log('error', f'Error actualizando máximo de advertencias: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 # ============================================
@@ -1485,8 +1712,9 @@ def api_get_allowed_links():
         links = config_service.get_allowed_links()
         return jsonify(list(links.keys()))
     except Exception as e:
+        logger.error(f"Error obteniendo enlaces permitidos: {e}", exc_info=True)
         log_service.add_log('error', f'Error obteniendo enlaces permitidos: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/links/allowed', methods=['POST'])
@@ -1505,8 +1733,9 @@ def api_add_allowed_link():
         else:
             return jsonify({'error': 'Error al añadir dominio'}), 500
     except Exception as e:
+        logger.error(f"Error añadiendo dominio permitido: {e}", exc_info=True)
         log_service.add_log('error', f'Error añadiendo dominio permitido: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/links/allowed/<domain>', methods=['DELETE'])
@@ -1520,8 +1749,9 @@ def api_remove_allowed_link(domain):
         else:
             return jsonify({'error': 'Dominio no encontrado'}), 404
     except Exception as e:
+        logger.error(f"Error eliminando dominio permitido: {e}", exc_info=True)
         log_service.add_log('error', f'Error eliminando dominio permitido: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 # ============================================
@@ -1540,8 +1770,9 @@ def api_twitch_remove_ban(user_id):
         else:
             return jsonify({'error': 'No se pudo desbanear al usuario'}), 400
     except Exception as e:
+        logger.error(f"Error removiendo ban: {e}", exc_info=True)
         log_service.add_log('error', f'Error removiendo ban: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/twitch/timeout/<user_id>', methods=['DELETE'])
@@ -1554,8 +1785,9 @@ def api_twitch_remove_timeout(user_id):
             log_service.add_log('info', f'Timeout removido para {user_name} (ID: {user_id}) por {current_user.username}', 'moderation')
         return jsonify({'message': f'Timeout removido para usuario {user_id}', 'success': True})
     except Exception as e:
+        logger.error(f"Error removiendo timeout: {e}", exc_info=True)
         log_service.add_log('error', f'Error removiendo timeout: {e}', 'dashboard')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Error interno'}), 500
 
 
 @app.route('/api/twitch/check/<user_id>')
@@ -1565,76 +1797,17 @@ def api_twitch_check_user(user_id):
         status = link_manager.check_user_status(user_id)
         return jsonify(status)
     except Exception as e:
+        logger.error(f"Error verificando usuario {user_id}: {e}", exc_info=True)
         log_service.add_log('error', f'Error verificando usuario {user_id}: {e}', 'dashboard')
-        return jsonify({'error': str(e), 'banned': False}), 500
+        return jsonify({'error': 'Error interno', 'banned': False}), 500
 
 
 # ============================================
-# WEBHOOK DE TWITCH (integrado)
+# HEALTH CHECK (adicional, ya existe uno arriba)
 # ============================================
-
-@app.route('/webhook/twitch', methods=['POST'])
-def twitch_webhook():
-    """Endpoint para webhooks de Twitch (EventSub)"""
-    try:
-        signature = request.headers.get('Twitch-Eventsub-Message-Signature', '')
-        message_id = request.headers.get('Twitch-Eventsub-Message-Id', '')
-        timestamp = request.headers.get('Twitch-Eventsub-Message-Timestamp', '')
-        message_type = request.headers.get('Twitch-Eventsub-Message-Type', '')
-        body = request.get_data(as_text=True)
-        message = message_id + timestamp + body
-
-        secret = os.getenv("TWITCH_WEBHOOK_SECRET", "")
-        if secret:
-            expected = hmac.new(
-                secret.encode('utf-8'),
-                message.encode('utf-8'),
-                hashlib.sha256
-            ).hexdigest()
-            if signature.startswith('sha256='):
-                signature = signature[7:]
-            if not hmac.compare_digest(expected, signature):
-                log_service.add_log('warning', 'Firma inválida en webhook', 'webhook')
-                return jsonify({"error": "Invalid signature"}), 401
-
-        data = request.json
-
-        if message_type == 'webhook_callback_verification':
-            challenge = data.get('challenge')
-            return jsonify({"challenge": challenge}), 200
-
-        if message_type == 'notification':
-            event_type = data.get('subscription', {}).get('type', 'unknown')
-            event_data = data.get('event', {})
-            log_service.add_log('info', f'Evento recibido: {event_type}', 'stats')
-
-            from services.eventsub_service import eventsub_service
-            if _bot_instance:
-                eventsub_service.set_bot(_bot_instance)
-                eventsub_service._process_event(event_type, event_data)
-
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        log_service.add_log('error', f'Error en webhook: {e}', 'webhook')
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/webhook/twitch', methods=['GET'])
-def twitch_webhook_get():
-    return jsonify({"status": "ready"}), 200
-
-
-# ============================================
-# HEALTH CHECK
-# ============================================
-
-@app.route('/health', methods=['GET'])
-def health():
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat()
-    }), 200
-
+# La ruta /health ya está definida arriba con más detalle.
+# Esta versión es redundante, la mantenemos por compatibilidad.
+# Se puede eliminar si no es necesaria, pero no afecta.
 
 # ============================================
 # RUN DASHBOARD
@@ -1642,7 +1815,8 @@ def health():
 
 def run_dashboard(port=None):
     if port is None:
-        port = int(os.getenv("PORT", 5002))
+        port = int(os.getenv("PORT", "10000"))  # Render usa PORT, por defecto 10000
     wait_for_tokens(timeout=60)
-    logger.info(f"🚀 Iniciando servidor dashboard en el puerto {port}")
+    app.config['START_TIME'] = datetime.now()
+    logger.info(f"🚀 Iniciando servidor dashboard + webhook en el puerto {port}")
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)

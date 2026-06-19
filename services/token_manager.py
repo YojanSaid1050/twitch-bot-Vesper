@@ -1,5 +1,7 @@
+# services/token_manager.py
 """
 Gestor de refresh de tokens de Twitch y Spotify (refactorizado con PostgreSQL)
+- FORZADO: el token de moderador siempre se sincroniza con el broadcaster.
 """
 
 import threading
@@ -330,6 +332,7 @@ class TokenManager:
     def _update_settings_token(self, token_type: TokenType, new_token: str, expires_in: int):
         """
         Actualiza el objeto settings y la base de datos.
+        NOTA: para BROADCASTER, settings.update_broadcaster_token ya sincroniza moderador.
         """
         if token_type == TokenType.BOT:
             settings.update_bot_token(new_token, expires_in)
