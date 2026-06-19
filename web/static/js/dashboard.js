@@ -424,3 +424,66 @@ window.forceRefresh = function () {
         showToast('Error al actualizar', 'error');
     });
 };
+
+// ============================================
+// CONTROL DE CONCURRENCIA (evita múltiples solicitudes)
+// ============================================
+
+// Almacena las promesas en curso para evitar duplicados
+const _pendingActions = new Map();
+
+/**
+ * Ejecuta una acción asegurando que no se ejecute simultáneamente.
+ * @param {string} actionId - Identificador único de la acción (ej: "delete-command-123")
+ * @param {Function} fn - Función asíncrona a ejecutar
+ * @param {HTMLElement} button - Botón que disparó la acción (opcional)
+ * @param {string} loadingText - Texto a mostrar en el botón durante la carga (opcional)
+ * @returns {Promise<any>}
+ */
+window.executeAction = async function(actionId, fn, button = null, loadingText = 'Procesando...') {
+    // Si ya hay una acción en curso con este ID, rechazar
+    if (_pendingActions.has(actionId)) {
+        showToast('Ya hay una solicitud en proceso, espera un momento.', 'warning');
+        return null;
+    }
+
+    // Marcar como en curso
+    _pendingActions.set(actionId, true);
+
+    // Deshabilitar botón si se proporciona
+    let originalHtml = null;
+    if (button) {
+        originalHtml = button.innerHTML;
+        button.disabled = true;
+        button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${loadingText}`;
+    }
+
+    try {
+        const result = await fn();
+        return result;
+    } finally {
+        // Limpiar estado
+        _pendingActions.delete(actionId);
+        // Restaurar botón
+        if (button && originalHtml !== null) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+};
+
+/**
+ * Versión con debounce para acciones rápidas (búsquedas, etc.)
+ * @param {Function} fn - Función a ejecutar
+ * @param {number} delay - Milisegundos de espera (default 300)
+ * @returns {Function}
+ */
+window.debounce = function(fn, delay = 300) {
+    let timer = null;
+    return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            fn.apply(this, args);
+        }, delay);
+    };
+};

@@ -1,21 +1,23 @@
 import os
 import psycopg2
 import psycopg2.extras
+from dotenv import load_dotenv
 
 def get_db_connection():
-    """
-    Retorna una conexión a PostgreSQL usando DATABASE_URL.
-    """
+    # Si no está en el entorno, intentar cargar desde .env
+    if not os.environ.get("DATABASE_URL"):
+        load_dotenv()
+    
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise ValueError("DATABASE_URL no configurada en variables de entorno")
-    conn = psycopg2.connect(database_url)
-    return conn
+    
+    return psycopg2.connect(database_url)
 
 def init_db():
-    """Crea la tabla oauth_tokens si no existe."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
+            # Tabla oauth_tokens
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS oauth_tokens (
                     provider TEXT NOT NULL,
@@ -27,9 +29,19 @@ def init_db():
                     PRIMARY KEY (provider, account)
                 )
             """)
+            # Tabla bot_config
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS bot_config (
+                    id SERIAL PRIMARY KEY,
+                    config_key TEXT NOT NULL UNIQUE,
+                    config_value JSONB NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
         conn.commit()
+        print("✅ Tablas creadas/verificadas correctamente")
 
-# Inicializar al importar (si DATABASE_URL está configurada)
+# Inicializar al importar
 try:
     init_db()
 except Exception as e:

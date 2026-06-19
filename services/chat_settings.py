@@ -5,9 +5,9 @@ Servicio para gestionar configuraciones del chat
 from typing import Optional
 from config import settings
 from services.twitch_api import TwitchAPI
+from services.log_service import log_service
 from exceptions import TwitchAPIError, ValidationError
 from utils.logger import get_logger
-from services.log_service import log_service
 
 logger = get_logger(__name__)
 
@@ -39,14 +39,20 @@ class ChatSettings:
             payload["slow_mode_wait_time"] = wait_time
         
         logger.info(f"Configurando modo lento: enabled={enabled}, wait_time={wait_time}")
-        log_service.add_log('info', f'Modo lento {"activado" if enabled else "desactivado"} (wait_time={wait_time})', 'chat_settings')
         
         try:
             response = self.api.patch("chat/settings", params=self._get_params(), json=payload)
+            # Log de éxito (moderación)
+            estado = "activado" if enabled else "desactivado"
+            log_service.add_log('info', f'Modo lento {estado} (wait_time={wait_time})', 'moderation')
             return response is None
-        except Exception as e:
+        except TwitchAPIError as e:
             logger.error(f"Error configurando modo lento: {e}")
-            log_service.add_log('error', f'Error configurando modo lento: {e}', 'chat_settings')
+            log_service.add_log('error', f'Error configurando modo lento: {e.message}', 'twitch_api')
+            raise
+        except Exception as e:
+            logger.error(f"Error inesperado configurando modo lento: {e}")
+            log_service.add_log('error', f'Error inesperado configurando modo lento: {e}', 'bot')
             raise
     
     async def set_follower_mode(self, enabled: bool, duration_minutes: Optional[int] = None) -> bool:
@@ -62,36 +68,54 @@ class ChatSettings:
             payload["follower_mode_duration"] = duration_minutes
         
         logger.info(f"Configurando modo followers: enabled={enabled}, duration={duration_minutes}")
-        log_service.add_log('info', f'Modo seguidores {"activado" if enabled else "desactivado"} (duration={duration_minutes})', 'chat_settings')
         
         try:
             response = self.api.patch("chat/settings", params=self._get_params(), json=payload)
+            # Log de éxito (moderación)
+            estado = "activado" if enabled else "desactivado"
+            log_service.add_log('info', f'Modo seguidores {estado} (duration={duration_minutes})', 'moderation')
             return response is None
-        except Exception as e:
+        except TwitchAPIError as e:
             logger.error(f"Error configurando modo followers: {e}")
-            log_service.add_log('error', f'Error configurando modo followers: {e}', 'chat_settings')
+            log_service.add_log('error', f'Error configurando modo followers: {e.message}', 'twitch_api')
+            raise
+        except Exception as e:
+            logger.error(f"Error inesperado configurando modo followers: {e}")
+            log_service.add_log('error', f'Error inesperado configurando modo followers: {e}', 'bot')
             raise
     
     async def set_emote_mode(self, enabled: bool) -> bool:
         logger.info(f"Configurando modo solo emotes: enabled={enabled}")
-        log_service.add_log('info', f'Modo emotes {"activado" if enabled else "desactivado"}', 'chat_settings')
         
         try:
             response = self.api.patch("chat/settings", params=self._get_params(), json={"emote_mode": enabled})
+            # Log de éxito (moderación)
+            estado = "activado" if enabled else "desactivado"
+            log_service.add_log('info', f'Modo emotes {estado}', 'moderation')
             return response is None
-        except Exception as e:
+        except TwitchAPIError as e:
             logger.error(f"Error configurando modo emotes: {e}")
-            log_service.add_log('error', f'Error configurando modo emotes: {e}', 'chat_settings')
+            log_service.add_log('error', f'Error configurando modo emotes: {e.message}', 'twitch_api')
+            raise
+        except Exception as e:
+            logger.error(f"Error inesperado configurando modo emotes: {e}")
+            log_service.add_log('error', f'Error inesperado configurando modo emotes: {e}', 'bot')
             raise
     
     async def set_subscriber_mode(self, enabled: bool) -> bool:
         logger.info(f"Configurando modo solo suscriptores: enabled={enabled}")
-        log_service.add_log('info', f'Modo suscriptores {"activado" if enabled else "desactivado"}', 'chat_settings')
         
         try:
             response = self.api.patch("chat/settings", params=self._get_params(), json={"subscriber_mode": enabled})
+            # Log de éxito (moderación)
+            estado = "activado" if enabled else "desactivado"
+            log_service.add_log('info', f'Modo suscriptores {estado}', 'moderation')
             return response is None
-        except Exception as e:
+        except TwitchAPIError as e:
             logger.error(f"Error configurando modo suscriptores: {e}")
-            log_service.add_log('error', f'Error configurando modo suscriptores: {e}', 'chat_settings')
+            log_service.add_log('error', f'Error configurando modo suscriptores: {e.message}', 'twitch_api')
+            raise
+        except Exception as e:
+            logger.error(f"Error inesperado configurando modo suscriptores: {e}")
+            log_service.add_log('error', f'Error inesperado configurando modo suscriptores: {e}', 'bot')
             raise

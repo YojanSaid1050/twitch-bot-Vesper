@@ -4,12 +4,19 @@ Twitch Bot - Punto de entrada principal
 Inicia el bot y el dashboard en el mismo proceso
 """
 
+import os
 import sys
+from pathlib import Path
+from dotenv import load_dotenv
+
+# ===== CARGAR VARIABLES DE ENTORNO ANTES DE CUALQUIER OTRA COSA =====
+load_dotenv()
+
+# Ahora el resto de importaciones
 import signal
 import threading
 import time
 import asyncio
-from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -19,6 +26,7 @@ from utils.logger import setup_logger
 from services.token_manager import token_manager
 from services.config_service import config_service
 from services.log_service import log_service
+from config import settings  # <--- IMPORTAR SETTINGS
 
 logger = setup_logger()
 
@@ -79,8 +87,9 @@ def main():
         logger.info("✅ Event loop creado y establecido para el hilo principal")
         log_service.add_log('info', 'Event loop creado para el hilo principal', 'main')
 
-    logger.info(f"📡 Canal: {config_service.get('CHANNEL', 'No configurado')}")
-    logger.info(f"🤖 Bot: {config_service.get('BOT_NICK', 'No configurado')}")
+    # ===== USAR SETTINGS EN VEZ DE CONFIG_SERVICE =====
+    logger.info(f"📺 Canal: {settings.CHANNEL}")
+    logger.info(f"🤖 Bot: {settings.BOT_NICK}")
 
     dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
     dashboard_thread.start()

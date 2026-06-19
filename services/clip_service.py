@@ -7,8 +7,8 @@ import time
 from typing import Optional, Dict
 
 from config import settings
-from utils.logger import get_logger
 from services.log_service import log_service
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -39,7 +39,7 @@ class ClipService:
                     if clip_id:
                         clip_url = f"https://clips.twitch.tv/{clip_id}"
                         logger.info(f"Clip creado: {clip_url}")
-                        log_service.add_log('info', f'Clip creado: {clip_url}', 'clip_service')
+                        log_service.add_log('info', f'Clip creado: {clip_url}', 'bot')
                         return {"success": True, "url": clip_url, "id": clip_id}
                 
                 return {"success": True, "url": "El clip se está procesando... espera unos segundos", "id": "processing"}
@@ -47,21 +47,25 @@ class ClipService:
             elif response.status_code == 404:
                 error_text = response.text.lower()
                 if "channel offline" in error_text or "offline" in error_text:
-                    log_service.add_log('warning', 'Intento de clip con stream offline', 'clip_service')
+                    log_service.add_log('warning', 'Intento de clip con stream offline', 'bot')
                     return {"success": False, "error": "offline"}
                 return {"success": False, "error": "not_found"}
             
             elif response.status_code == 401:
-                log_service.add_log('error', 'Token no autorizado para crear clip', 'clip_service')
+                log_service.add_log('error', 'Token no autorizado para crear clip', 'twitch_api')
                 return {"success": False, "error": "unauthorized"}
             
             else:
-                log_service.add_log('error', f'Error creando clip: {response.status_code}', 'clip_service')
+                log_service.add_log('error', f'Error creando clip: {response.status_code}', 'twitch_api')
                 return {"success": False, "error": "unknown", "details": f"Error {response.status_code}"}
             
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error de conexión creando clip: {e}")
+            log_service.add_log('error', f'Error de conexión creando clip: {e}', 'twitch_api')
+            return {"success": False, "error": "connection_error", "details": str(e)}
         except Exception as e:
             logger.error(f"Error creando clip: {e}")
-            log_service.add_log('error', f'Error creando clip: {e}', 'clip_service')
+            log_service.add_log('error', f'Error creando clip: {e}', 'bot')
             return {"success": False, "error": "exception", "details": str(e)}
 
 

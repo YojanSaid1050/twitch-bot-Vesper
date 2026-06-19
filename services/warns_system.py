@@ -1,7 +1,7 @@
 from services.moderation_actions import ModerationActions
 from services.config_service import config_service
-from utils.logger import get_logger
 from services.log_service import log_service
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -18,7 +18,8 @@ class WarnsSystem:
             warnings = config_service.get_warnings(user_id)
             warning_count = len(warnings)
             
-            log_service.add_log('info', f'Advertencia a {user_name} por {reason} (total: {warning_count})', 'warns_system')
+            # Log de advertencia (moderación)
+            log_service.add_log('warning', f'Advertencia aplicada a {user_name} (total: {warning_count}) por {warned_by}. Razón: "{reason}"', 'moderation')
 
             action_taken = False
 
@@ -26,12 +27,13 @@ class WarnsSystem:
                 await self.mod_actions.timeout(user_name, 600, "Máximo de advertencias alcanzado")
                 action_taken = True
                 config_service.clear_warnings(user_id)
-                log_service.add_log('warning', f'Timeout a {user_name} por máximo de advertencias ({warning_count})', 'warns_system')
+                # Log de timeout automático (moderación)
+                log_service.add_log('warning', f'Timeout automático a {user_name} por máximo de advertencias ({warning_count}/{self.MAX_WARNS})', 'moderation')
 
             return warning_count, action_taken
         except Exception as e:
             logger.error(f"Error en add_warning: {e}")
-            log_service.add_log('error', f'Error en add_warning para {user_name}: {e}', 'warns_system')
+            log_service.add_log('error', f'Error al añadir advertencia para {user_name}: {e}', 'bot')
             raise
 
 

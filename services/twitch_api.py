@@ -7,9 +7,9 @@ import requests
 from typing import Dict, Any, Optional
 
 from config import settings
+from services.log_service import log_service
 from exceptions import TwitchAPIError, RateLimitError, AuthenticationError
 from utils.logger import get_logger
-from services.log_service import log_service
 
 logger = get_logger(__name__)
 

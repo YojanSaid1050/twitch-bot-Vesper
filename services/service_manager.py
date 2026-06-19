@@ -4,7 +4,7 @@ from services.stream_manager import StreamManager
 from services.moderation_actions import ModerationActions
 from services.config_service import config_service
 from services.token_manager import token_manager
-from services.log_service import log_service  # <-- NUEVO
+from services.log_service import log_service
 
 
 class ServiceManager:
@@ -30,9 +30,9 @@ class ServiceManager:
             self.config = config_service
             self.token_manager = token_manager
             print("✅ ServiceManager inicializado")
-            log_service.add_log('info', 'ServiceManager inicializado', 'service_manager')
+            log_service.add_log('info', 'ServiceManager inicializado', 'bot')
         except Exception as e:
-            log_service.add_log('critical', f'Error inicializando ServiceManager: {e}', 'service_manager')
+            log_service.add_log('critical', f'Error inicializando ServiceManager: {e}', 'bot')
             raise
 
 

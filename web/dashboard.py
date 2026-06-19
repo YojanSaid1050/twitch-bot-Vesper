@@ -225,7 +225,7 @@ def api_dashboard_data():
         data = {
             'timestamp': datetime.now().isoformat(),
             'status': {
-                'connected': True,  # <--- NUEVO: indica que el bot está conectado
+                'connected': True,
                 'live': False,
                 'viewers': 0,
                 'game': 'No especificado',
@@ -423,7 +423,7 @@ def api_dashboard_data():
                     })
         except Exception as e:
             logger.error(f"Error obteniendo baneados de Twitch: {e}")
-            log_service.add_log('error', f'Error obteniendo baneados de Twitch: {e}', 'link_manager')
+            log_service.add_log('error', f'Error obteniendo baneados de Twitch: {e}', 'twitch_api')
         
         try:
             twitch_timeouts = link_manager.get_twitch_timeouts()
@@ -437,7 +437,7 @@ def api_dashboard_data():
                 })
         except Exception as e:
             logger.error(f"Error obteniendo timeouts de Twitch: {e}")
-            log_service.add_log('error', f'Error obteniendo timeouts de Twitch: {e}', 'link_manager')
+            log_service.add_log('error', f'Error obteniendo timeouts de Twitch: {e}', 'twitch_api')
         
         # Todas las advertencias (warning_manager)
         try:
@@ -467,7 +467,7 @@ def api_dashboard_data():
                 })
         except Exception as e:
             logger.error(f"Error obteniendo todas las advertencias: {e}")
-            log_service.add_log('error', f'Error obteniendo todas las advertencias: {e}', 'link_manager')
+            log_service.add_log('error', f'Error obteniendo todas las advertencias: {e}', 'twitch_api')
         
         # Baneados y timeouts del bot (link_manager)
         try:
@@ -481,7 +481,7 @@ def api_dashboard_data():
                 })
         except Exception as e:
             logger.error(f"Error obteniendo baneados del bot: {e}")
-            log_service.add_log('error', f'Error obteniendo baneados del bot: {e}', 'link_manager')
+            log_service.add_log('error', f'Error obteniendo baneados del bot: {e}', 'twitch_api')
         
         try:
             bot_timeouts = link_manager.get_timeout_users_with_names()
@@ -494,7 +494,7 @@ def api_dashboard_data():
                 })
         except Exception as e:
             logger.error(f"Error obteniendo timeouts del bot: {e}")
-            log_service.add_log('error', f'Error obteniendo timeouts del bot: {e}', 'link_manager')
+            log_service.add_log('error', f'Error obteniendo timeouts del bot: {e}', 'twitch_api')
         
         # --- Configuración ---
         data['settings']['slow_mode'] = config_service.get_slow_mode()
@@ -557,6 +557,7 @@ def api_delete_warnings(user_id):
         data = request.json or {}
         warning_type = data.get('type')
         count = data.get('count', 0)
+        username = data.get('user_name', user_id)
         
         if warning_type:
             if count > 0:
@@ -569,14 +570,37 @@ def api_delete_warnings(user_id):
                     if user_id in warnings and warning_type in warnings[user_id]:
                         warnings[user_id][warning_type] = new_count
                     warning_manager._save_data()
-                log_service.add_log('info', f'Advertencias de tipo {warning_type} reducidas a {new_count} para usuario {user_id}', 'dashboard')
+                
+                type_names = {
+                    'link': 'enlaces',
+                    'word': 'palabras prohibidas',
+                    'caps': 'mayúsculas excesivas',
+                    'rate': 'spam por velocidad',
+                    'repeat': 'mensajes repetidos'
+                }
+                tipo = type_names.get(warning_type, warning_type)
+                log_service.add_log('info', 
+                    f'Advertencias de {tipo} reducidas a {new_count} para {username} por {current_user.username}',
+                    'moderation'
+                )
                 return jsonify({
                     'success': True,
                     'message': f'Advertencias de tipo {warning_type} reducidas a {new_count}'
                 })
             else:
                 count_removed = warning_manager.clear_warnings(user_id, warning_type)
-                log_service.add_log('info', f'Todas las advertencias de tipo {warning_type} eliminadas para usuario {user_id} ({count_removed} eliminadas)', 'dashboard')
+                type_names = {
+                    'link': 'enlaces',
+                    'word': 'palabras prohibidas',
+                    'caps': 'mayúsculas excesivas',
+                    'rate': 'spam por velocidad',
+                    'repeat': 'mensajes repetidos'
+                }
+                tipo = type_names.get(warning_type, warning_type)
+                log_service.add_log('info', 
+                    f'Todas las advertencias de {tipo} eliminadas para {username} ({count_removed} eliminadas) por {current_user.username}',
+                    'moderation'
+                )
                 return jsonify({
                     'success': True,
                     'message': f'Todas las advertencias de tipo {warning_type} eliminadas ({count_removed})'
@@ -587,7 +611,10 @@ def api_delete_warnings(user_id):
                 total = sum(warning_manager.warnings[user_id].values())
                 del warning_manager.warnings[user_id]
                 warning_manager._save_data()
-            log_service.add_log('info', f'Todas las advertencias eliminadas para usuario {user_id} ({total})', 'dashboard')
+            log_service.add_log('info', 
+                f'Todas las advertencias eliminadas para {username} ({total}) por {current_user.username}',
+                'moderation'
+            )
             return jsonify({
                 'success': True,
                 'message': f'Todas las advertencias eliminadas ({total})'
@@ -604,9 +631,14 @@ def api_clear_link_warnings(user_id):
     try:
         data = request.json
         count = data.get('count', 0)
+        user_name = data.get('user_name', user_id)
+        
         if count == 0:
             removed = link_manager.clear_warnings(user_id)
-            log_service.add_log('info', f'Advertencias de enlaces limpiadas para usuario {user_id}', 'dashboard')
+            log_service.add_log('info', 
+                f'Advertencias de enlaces limpiadas para {user_name} por {current_user.username}',
+                'moderation'
+            )
             return jsonify({'message': f'Advertencias limpiadas: {removed}', 'success': True})
         else:
             current = link_manager.get_warning_count(user_id)
@@ -619,7 +651,10 @@ def api_clear_link_warnings(user_id):
                 else:
                     link_manager.link_warnings[user_id] = new_count
             link_manager._save_data()
-            log_service.add_log('info', f'Advertencias de enlaces reducidas a {new_count} para usuario {user_id}', 'dashboard')
+            log_service.add_log('info', 
+                f'Advertencias de enlaces reducidas a {new_count} para {user_name} por {current_user.username}',
+                'moderation'
+            )
             return jsonify({'message': f'Advertencias reducidas a {new_count}', 'success': True})
     except Exception as e:
         log_service.add_log('error', f'Error limpiando advertencias de enlaces: {e}', 'dashboard')
@@ -807,24 +842,45 @@ def api_spotify_clear_queue():
 
 
 # ============================================
-# ENDPOINTS DE LOGS
+# ENDPOINTS DE LOGS (MODIFICADOS)
 # ============================================
 
 @app.route('/api/logs')
 @login_required
 def api_get_logs():
+    """
+    Devuelve logs del sistema (excluye moderation y stats por defecto).
+    Si se especifica source, devuelve solo esa fuente.
+    """
     try:
         limit = int(request.args.get('limit', 100))
         level = request.args.get('level', None)
         source = request.args.get('source', None)
-        logs = log_service.get_logs(limit=limit, level_filter=level, source_filter=source)
+        
         all_logs = list(log_service.logs)
+        
+        # Si no se especifica source, excluir moderation y stats (solo sistema)
+        if not source:
+            all_logs = [log for log in all_logs if log.get('source') not in ('moderation', 'stats')]
+        else:
+            all_logs = [log for log in all_logs if log.get('source') == source]
+        
+        # Aplicar filtro de nivel
+        if level:
+            all_logs = [log for log in all_logs if log.get('level') == level.upper()]
+        
+        # Ordenar por timestamp descendente (más reciente primero)
+        all_logs = sorted(all_logs, key=lambda x: x['timestamp'], reverse=True)
+        
+        # Obtener fuentes disponibles (excluyendo moderation y stats para el selector)
         sources = sorted(set([l.get('source', 'unknown') for l in all_logs]))
-        levels = ['INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        # Asegurar que no se filtren sources no deseados en el selector
+        sources = [s for s in sources if s not in ('moderation', 'stats')]
+        
         return jsonify({
-            'logs': logs,
+            'logs': all_logs[:limit],
             'sources': sources,
-            'levels': levels
+            'levels': ['INFO', 'WARNING', 'ERROR', 'CRITICAL']
         })
     except Exception as e:
         logger.error(f"Error obteniendo logs: {e}")
@@ -834,11 +890,68 @@ def api_get_logs():
 @app.route('/api/logs/clear', methods=['POST'])
 @login_required
 def api_clear_logs():
+    """
+    Limpia logs por categoría.
+    category: 'system', 'moderation', 'stats' o None (todos)
+    """
     try:
-        log_service.clear_logs()
-        return jsonify({'success': True, 'message': 'Logs limpiados'})
+        from collections import deque
+        data = request.json or {}
+        category = data.get('category')
+        
+        if category == 'system':
+            # Eliminar todos los logs excepto moderation y stats
+            new_logs = deque([log for log in log_service.logs if log.get('source') in ('moderation', 'stats')], maxlen=log_service.max_logs)
+            log_service.logs = new_logs
+            log_service.add_log('info', f'Logs del sistema limpiados por {current_user.username}', 'dashboard')
+        elif category == 'moderation':
+            # Eliminar solo logs de moderación
+            new_logs = deque([log for log in log_service.logs if log.get('source') != 'moderation'], maxlen=log_service.max_logs)
+            log_service.logs = new_logs
+            log_service.add_log('info', f'Logs de moderación limpiados por {current_user.username}', 'dashboard')
+        elif category == 'stats':
+            # Eliminar solo logs de estadísticas
+            new_logs = deque([log for log in log_service.logs if log.get('source') != 'stats'], maxlen=log_service.max_logs)
+            log_service.logs = new_logs
+            log_service.add_log('info', f'Logs de estadísticas limpiados por {current_user.username}', 'dashboard')
+        else:
+            # Limpiar todos los logs (comportamiento por defecto)
+            log_service.clear_logs()
+            log_service.add_log('info', f'Todos los logs limpiados por {current_user.username}', 'dashboard')
+        
+        return jsonify({'success': True, 'message': 'Logs limpiados correctamente'})
     except Exception as e:
         logger.error(f"Error limpiando logs: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/logs/moderation')
+@login_required
+def api_get_moderation_logs():
+    """Devuelve logs filtrados por fuente de moderación."""
+    try:
+        limit = int(request.args.get('limit', 100))
+        all_logs = list(log_service.logs)
+        mod_logs = [log for log in all_logs if log.get('source') == 'moderation']
+        mod_logs = sorted(mod_logs, key=lambda x: x['timestamp'], reverse=True)
+        return jsonify({'logs': mod_logs[:limit]})
+    except Exception as e:
+        logger.error(f"Error obteniendo logs de moderación: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/logs/stats')
+@login_required
+def api_get_stats_logs():
+    """Devuelve logs filtrados por fuente de estadísticas (follows, subs, raids, etc.)."""
+    try:
+        limit = int(request.args.get('limit', 100))
+        all_logs = list(log_service.logs)
+        stats_logs = [log for log in all_logs if log.get('source') == 'stats']
+        stats_logs = sorted(stats_logs, key=lambda x: x['timestamp'], reverse=True)
+        return jsonify({'logs': stats_logs[:limit]})
+    except Exception as e:
+        logger.error(f"Error obteniendo logs de estadísticas: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -900,7 +1013,7 @@ def api_get_commands():
         return jsonify(command_list)
     except Exception as e:
         logger.error(f"Error en /api/commands: {e}")
-        log_service.add_log('error', f'Error obteniendo comandos: {e}', 'config_service')
+        log_service.add_log('error', f'Error obteniendo comandos: {e}', 'dashboard')
         return jsonify([])
 
 
@@ -961,7 +1074,7 @@ def api_get_social_links():
             'tiktok': config_service.get_social_link('tiktok')
         })
     except Exception as e:
-        log_service.add_log('error', f'Error obteniendo enlaces sociales: {e}', 'config_service')
+        log_service.add_log('error', f'Error obteniendo enlaces sociales: {e}', 'dashboard')
         return jsonify({})
 
 
@@ -1042,7 +1155,7 @@ def api_add_banned_word():
             return jsonify({'error': 'Palabra requerida'}), 400
         success = config_service.add_banned_word(word)
         if success:
-            log_service.add_log('info', f'Palabra prohibida "{word}" añadida', 'dashboard')
+            log_service.add_log('info', f'Palabra prohibida "{word}" añadida por {current_user.username}', 'moderation')
             return jsonify({'message': f'Palabra "{word}" añadida', 'success': success})
         else:
             return jsonify({'error': 'Palabra ya existe'}), 400
@@ -1057,7 +1170,7 @@ def api_delete_banned_word(word):
     try:
         success = config_service.remove_banned_word(word)
         if success:
-            log_service.add_log('info', f'Palabra prohibida "{word}" eliminada', 'dashboard')
+            log_service.add_log('info', f'Palabra prohibida "{word}" eliminada por {current_user.username}', 'moderation')
             return jsonify({'message': f'Palabra "{word}" eliminada'})
         else:
             return jsonify({'error': 'Palabra no encontrada'}), 404
@@ -1072,7 +1185,7 @@ def api_reload_banned_words():
     try:
         from security.anti_spam import anti_spam
         anti_spam.reload_banned_words()
-        log_service.add_log('info', 'Palabras prohibidas recargadas en el bot', 'dashboard')
+        log_service.add_log('info', f'Palabras prohibidas recargadas en el bot por {current_user.username}', 'moderation')
         return jsonify({
             'success': True,
             'message': f'Palabras prohibidas recargadas: {len(anti_spam.banned_words)}'
@@ -1098,7 +1211,7 @@ def api_change_password():
             return jsonify({'error': 'La nueva contraseña debe tener al menos 6 caracteres'}), 400
         success = config_service.set_dashboard_password(new)
         if success:
-            log_service.add_log('info', 'Contraseña del dashboard actualizada', 'dashboard')
+            log_service.add_log('info', f'Contraseña del dashboard actualizada por {current_user.username}', 'dashboard')
         return jsonify({'message': 'Contraseña actualizada', 'success': success})
     except Exception as e:
         log_service.add_log('error', f'Error cambiando contraseña: {e}', 'dashboard')
@@ -1126,7 +1239,7 @@ def api_update_stream_title():
         result = loop.run_until_complete(stream_manager.update_title(title))
         loop.close()
         if result:
-            log_service.add_log('info', f'Título del stream actualizado: {title}', 'dashboard')
+            log_service.add_log('info', f'Título del stream actualizado a "{title}" por {current_user.username}', 'moderation')
             return jsonify({'success': True, 'message': 'Título actualizado correctamente'})
         else:
             return jsonify({'success': False, 'error': 'No se pudo actualizar el título'}), 500
@@ -1152,7 +1265,7 @@ def api_update_stream_game():
         try:
             game_id, actual_name = loop.run_until_complete(stream_manager.update_game(game_name))
             loop.close()
-            log_service.add_log('info', f'Juego del stream actualizado a "{actual_name}"', 'dashboard')
+            log_service.add_log('info', f'Juego del stream actualizado a "{actual_name}" por {current_user.username}', 'moderation')
             return jsonify({
                 'success': True,
                 'message': 'Juego actualizado correctamente',
@@ -1258,7 +1371,8 @@ def api_set_slow_mode():
                 logger.error(f"Error aplicando slow mode: {e}")
                 log_service.add_log('warning', f'Error aplicando modo lento en el bot: {e}', 'bot')
         if success:
-            log_service.add_log('info', f'Modo lento {"activado" if enabled else "desactivado"} ({seconds}s)', 'dashboard')
+            estado = "activado" if enabled else "desactivado"
+            log_service.add_log('info', f'Modo lento {estado} ({seconds}s) por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
         log_service.add_log('error', f'Error configurando modo lento: {e}', 'dashboard')
@@ -1285,7 +1399,8 @@ def api_set_follower_mode():
                 logger.error(f"Error aplicando follower mode: {e}")
                 log_service.add_log('warning', f'Error aplicando modo seguidores en el bot: {e}', 'bot')
         if success:
-            log_service.add_log('info', f'Modo seguidores {"activado" if enabled else "desactivado"} ({minutes}m)', 'dashboard')
+            estado = "activado" if enabled else "desactivado"
+            log_service.add_log('info', f'Modo seguidores {estado} ({minutes}m) por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
         log_service.add_log('error', f'Error configurando modo seguidores: {e}', 'dashboard')
@@ -1309,7 +1424,8 @@ def api_set_emote_mode():
                 logger.error(f"Error aplicando emote mode: {e}")
                 log_service.add_log('warning', f'Error aplicando modo emotes en el bot: {e}', 'bot')
         if success:
-            log_service.add_log('info', f'Modo emotes {"activado" if enabled else "desactivado"}', 'dashboard')
+            estado = "activado" if enabled else "desactivado"
+            log_service.add_log('info', f'Modo emotes {estado} por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
         log_service.add_log('error', f'Error configurando modo emotes: {e}', 'dashboard')
@@ -1333,7 +1449,8 @@ def api_set_subscriber_mode():
                 logger.error(f"Error aplicando subscriber mode: {e}")
                 log_service.add_log('warning', f'Error aplicando modo suscriptores en el bot: {e}', 'bot')
         if success:
-            log_service.add_log('info', f'Modo suscriptores {"activado" if enabled else "desactivado"}', 'dashboard')
+            estado = "activado" if enabled else "desactivado"
+            log_service.add_log('info', f'Modo suscriptores {estado} por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
         log_service.add_log('error', f'Error configurando modo suscriptores: {e}', 'dashboard')
@@ -1350,7 +1467,7 @@ def api_set_max_warnings():
             return jsonify({'error': 'El valor debe estar entre 1 y 10'}), 400
         success = config_service.set_max_warnings(value)
         if success:
-            log_service.add_log('info', f'Máximo de advertencias actualizado a {value}', 'dashboard')
+            log_service.add_log('info', f'Máximo de advertencias actualizado a {value} por {current_user.username}', 'moderation')
         return jsonify({'success': success})
     except Exception as e:
         log_service.add_log('error', f'Error actualizando máximo de advertencias: {e}', 'dashboard')
@@ -1383,7 +1500,7 @@ def api_add_allowed_link():
         domain = domain.replace('https://', '').replace('http://', '').replace('www.', '')
         success = config_service.add_allowed_link(domain)
         if success:
-            log_service.add_log('info', f'Dominio permitido añadido: {domain}', 'dashboard')
+            log_service.add_log('info', f'Dominio permitido añadido: {domain} por {current_user.username}', 'moderation')
             return jsonify({'message': f'Dominio {domain} añadido', 'success': True})
         else:
             return jsonify({'error': 'Error al añadir dominio'}), 500
@@ -1398,7 +1515,7 @@ def api_remove_allowed_link(domain):
     try:
         success = config_service.remove_allowed_link(domain)
         if success:
-            log_service.add_log('info', f'Dominio permitido eliminado: {domain}', 'dashboard')
+            log_service.add_log('info', f'Dominio permitido eliminado: {domain} por {current_user.username}', 'moderation')
             return jsonify({'message': f'Dominio {domain} eliminado', 'success': True})
         else:
             return jsonify({'error': 'Dominio no encontrado'}), 404
@@ -1417,7 +1534,8 @@ def api_twitch_remove_ban(user_id):
     try:
         success = link_manager.remove_twitch_ban(user_id)
         if success:
-            log_service.add_log('info', f'Ban removido para usuario {user_id}', 'dashboard')
+            user_name = link_manager.get_user_name_by_id(user_id)
+            log_service.add_log('info', f'Ban removido para {user_name} (ID: {user_id}) por {current_user.username}', 'moderation')
             return jsonify({'message': f'Usuario {user_id} desbaneado', 'success': True})
         else:
             return jsonify({'error': 'No se pudo desbanear al usuario'}), 400
@@ -1432,10 +1550,9 @@ def api_twitch_remove_timeout(user_id):
     try:
         success = link_manager.remove_twitch_timeout(user_id)
         if success:
-            log_service.add_log('info', f'Timeout removido para usuario {user_id}', 'dashboard')
-            return jsonify({'message': f'Timeout removido para usuario {user_id}', 'success': True})
-        else:
-            return jsonify({'error': 'No se pudo quitar el timeout'}), 400
+            user_name = link_manager.get_user_name_by_id(user_id)
+            log_service.add_log('info', f'Timeout removido para {user_name} (ID: {user_id}) por {current_user.username}', 'moderation')
+        return jsonify({'message': f'Timeout removido para usuario {user_id}', 'success': True})
     except Exception as e:
         log_service.add_log('error', f'Error removiendo timeout: {e}', 'dashboard')
         return jsonify({'error': str(e)}), 500
@@ -1489,7 +1606,7 @@ def twitch_webhook():
         if message_type == 'notification':
             event_type = data.get('subscription', {}).get('type', 'unknown')
             event_data = data.get('event', {})
-            log_service.add_log('info', f'Evento recibido: {event_type}', 'webhook')
+            log_service.add_log('info', f'Evento recibido: {event_type}', 'stats')
 
             from services.eventsub_service import eventsub_service
             if _bot_instance:
@@ -1525,7 +1642,7 @@ def health():
 
 def run_dashboard(port=None):
     if port is None:
-        port = int(os.getenv("PORT", 5002))   # Usa PORT de Render o 5002 por defecto
+        port = int(os.getenv("PORT", 5002))
     wait_for_tokens(timeout=60)
     logger.info(f"🚀 Iniciando servidor dashboard en el puerto {port}")
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)

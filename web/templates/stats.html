@@ -347,7 +347,7 @@
 </style>
 
 <!-- ============================================ -->
-<!-- SCRIPTS (funcionalidad 100% preservada)     -->
+<!-- SCRIPTS (funcionalidad + corrección de estado) -->
 <!-- ============================================ -->
 <script>
     let statsChart = null;
@@ -442,7 +442,7 @@
             }
         });
 
-        // Toggle datasets (mejorado con nuevos checkboxes)
+        // Toggle datasets
         document.getElementById('toggle-followers').addEventListener('change', function () {
             statsChart.data.datasets[0].hidden = !this.checked;
             statsChart.update();
@@ -504,7 +504,15 @@
                 document.getElementById('stat-viewers').textContent = data.viewers || 0;
                 document.getElementById('stat-game').textContent = data.game || 'No especificado';
                 document.getElementById('stat-title').textContent = data.title || 'Sin título';
-                document.getElementById('stat-uptime').textContent = data.live ? '🟢 En vivo' : '🔴 Offline';
+
+                // Estado con punto verde/rojo
+                const uptimeEl = document.getElementById('stat-uptime');
+                if (data.live) {
+                    uptimeEl.innerHTML = '<i class="fas fa-circle" style="color: #22c55e; font-size: 12px;"></i> En vivo';
+                } else {
+                    uptimeEl.innerHTML = '<i class="fas fa-circle" style="color: #ef4444; font-size: 12px;"></i> Offline';
+                }
+
                 document.getElementById('stat-followers').textContent = data.followers || 0;
                 document.getElementById('stat-subscribers').textContent = data.subscribers || 0;
                 document.getElementById('stat-commands').textContent = data.commands || 0;
@@ -528,7 +536,14 @@
         document.getElementById('stat-viewers').textContent = data.status?.viewers || 0;
         document.getElementById('stat-game').textContent = data.status?.game || 'No especificado';
         document.getElementById('stat-title').textContent = data.status?.title || 'Sin título';
-        document.getElementById('stat-uptime').textContent = data.status?.live ? '🟢 En vivo' : '🔴 Offline';
+
+        // Estado con punto verde/rojo
+        const uptimeEl = document.getElementById('stat-uptime');
+        if (data.status?.live) {
+            uptimeEl.innerHTML = '<i class="fas fa-circle" style="color: #22c55e; font-size: 12px;"></i> En vivo';
+        } else {
+            uptimeEl.innerHTML = '<i class="fas fa-circle" style="color: #ef4444; font-size: 12px;"></i> Offline';
+        }
 
         document.getElementById('stat-followers').textContent = data.stats?.followers || 0;
         document.getElementById('stat-subscribers').textContent = data.stats?.subscribers || 0;
@@ -592,3 +607,66 @@
 </script>
 
 {% endblock %}
+<script>
+// Sobrescribir funciones comunes para usar executeAction
+(function() {
+    // Lista de funciones a proteger (las que ya existen en el contexto global)
+    const functionsToProtect = [
+        'deleteCommand',
+        'removeWord',
+        'removeLink',
+        'clearWarnings',
+        'clearModerationLogs',
+        'clearStatsLogs',
+        'clearSystemLogs',
+        'clearAllLogs',
+        'refreshLogs',
+        'refreshModLogs',
+        'refreshStatsLogs',
+        'refreshAllLogs',
+        'applyFilters',
+        'applyModFilters',
+        'applyStatsFilters',
+        'loadCommands',
+        'loadBannedWords',
+        'loadAllowedLinks',
+        'refreshWarnings',
+        'refreshTimeouts',
+        'refreshBanned',
+        'checkAllUsers',
+        'saveStreamTitle',
+        'saveStreamGame',
+        'saveBotIcon',
+        'saveAvatar',
+        'clearAvatar'
+    ];
+
+    // Para cada función, reemplazarla con una versión que usa executeAction
+    functionsToProtect.forEach(funcName => {
+        const original = window[funcName];
+        if (typeof original === 'function') {
+            window[funcName] = function(...args) {
+                // Generar un ID único para la acción
+                const actionId = funcName + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
+                // Encontrar el botón que disparó la acción (si existe)
+                const button = document.activeElement?.closest('button') || null;
+                return window.executeAction(actionId, () => original(...args), button, 'Procesando...');
+            };
+            console.log('🔒 Función protegida:', funcName);
+        }
+    });
+
+    // Proteger también los envíos de formularios
+    document.querySelectorAll('form[onsubmit]').forEach(form => {
+        const originalSubmit = form.onsubmit;
+        if (originalSubmit) {
+            form.onsubmit = function(e) {
+                e.preventDefault();
+                const actionId = 'form-' + this.id + '-' + Date.now();
+                const button = this.querySelector('button[type="submit"]') || null;
+                return window.executeAction(actionId, () => originalSubmit.call(this, e), button, 'Guardando...');
+            };
+        }
+    });
+})();
+</script>

@@ -10,11 +10,12 @@ import threading
 import time
 import requests.exceptions
 import os
+import json
 from datetime import datetime, timedelta
 
 from config import settings
-from utils.logger import get_logger
 from services.log_service import log_service
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -46,7 +47,7 @@ class SpotifyService:
             self._start_monitoring()
         else:
             logger.warning("⚠️ Spotify no configurado. Los comandos !sr no funcionarán.")
-            log_service.add_log('warning', 'Spotify no configurado (faltan credenciales)', 'spotify_service')
+            log_service.add_log('warning', 'Spotify no configurado (faltan credenciales)', 'bot')
     
     def _authenticate(self):
         """Autenticar con Spotify usando refresh token desde settings"""
@@ -56,18 +57,18 @@ class SpotifyService:
             if not refresh_token:
                 logger.warning("⚠️ No hay SPOTIFY_REFRESH_TOKEN configurado en variables de entorno")
                 logger.warning("💡 Agrega SPOTIFY_REFRESH_TOKEN a las variables de entorno de Render")
-                log_service.add_log('warning', 'No hay SPOTIFY_REFRESH_TOKEN configurado', 'spotify_service')
+                log_service.add_log('warning', 'No hay SPOTIFY_REFRESH_TOKEN configurado', 'token_manager')
                 self.sp = None
                 self.token_valid = False
                 return
             
-            # Crear auth manager sin caché
+            # Crear auth manager sin caché (usa os.devnull para descartar escritura)
             auth_manager = SpotifyOAuth(
                 client_id=self.client_id,
                 client_secret=self.client_secret,
                 redirect_uri=self.redirect_uri,
                 scope=self.scope,
-                cache_path=None,
+                cache_path=os.devnull,  # ✅ Evita crear archivo .cache
                 open_browser=False,
                 show_dialog=False
             )
@@ -88,17 +89,17 @@ class SpotifyService:
                     
                     logger.info("✅ Token de Spotify generado correctamente")
                     logger.info(f"⏰ Expira en: {expires_in // 60} minutos")
-                    log_service.add_log('info', f'Token de Spotify generado desde refresh token (expira en {expires_in//60}m)', 'spotify_service')
+                    log_service.add_log('info', f'Token de Spotify generado desde refresh token (expira en {expires_in//60}m)', 'token_manager')
                     
-                    # Verificar que funciona
+                    # Verificar que funciona (no crítico)
                     try:
                         user = self.sp.current_user()
                         logger.info(f"👤 Conectado como: {user.get('display_name', 'Usuario Spotify')}")
                     except Exception as e:
-                        logger.warning(f"⚠️ Verificación falló: {e}")
+                        logger.debug(f"Verificación de usuario falló (no crítico): {e}")
                 else:
                     logger.error("❌ No se pudo generar token de Spotify con el refresh token")
-                    log_service.add_log('error', 'No se pudo generar token de Spotify con refresh token', 'spotify_service')
+                    log_service.add_log('error', 'No se pudo generar token de Spotify con refresh token', 'token_manager')
                     self.sp = None
                     self.token_valid = False
                     
@@ -107,16 +108,16 @@ class SpotifyService:
                 if "invalid refresh token" in error_msg.lower():
                     logger.error("❌ Refresh token inválido o expirado. Genera uno nuevo localmente.")
                     logger.error("💡 Ejecuta en local el script para generar SPOTIFY_REFRESH_TOKEN")
-                    log_service.add_log('error', 'Refresh token de Spotify inválido', 'spotify_service')
+                    log_service.add_log('error', 'Refresh token de Spotify inválido', 'token_manager')
                 else:
                     logger.error(f"❌ Error generando token de Spotify: {e}")
-                    log_service.add_log('error', f'Error generando token de Spotify: {e}', 'spotify_service')
+                    log_service.add_log('error', f'Error generando token de Spotify: {e}', 'token_manager')
                 self.sp = None
                 self.token_valid = False
                 
         except Exception as e:
             logger.error(f"❌ Error autenticando con Spotify: {e}")
-            log_service.add_log('error', f'Error autenticando con Spotify: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error autenticando con Spotify: {e}', 'token_manager')
             self.sp = None
             self.token_valid = False
     
@@ -175,29 +176,36 @@ class SpotifyService:
                     now = time.time()
                     if now - self._last_error_time > self._error_cooldown:
                         logger.warning(f"⚠️ Spotify no responde (posiblemente cerrado): {e}")
-                        log_service.add_log('warning', f'Spotify no responde: {e}', 'spotify_service')
+                        log_service.add_log('warning', f'Spotify no responde: {e}', 'twitch_api')
                         self._last_error_time = now
                     if consecutive_errors > 5:
                         time.sleep(10)
                     else:
                         time.sleep(5)
+                except json.JSONDecodeError as e:
+                    # Error de decodificación JSON (respuesta vacía o mal formada) - ignorar silenciosamente
+                    time.sleep(2)
                 except Exception as e:
                     error_msg = str(e)
                     now = time.time()
-                    if "EOF" in error_msg or "Server listening" in error_msg:
+                    # Silenciar errores comunes de Spotify cuando no hay dispositivo activo
+                    if "Expecting value" in error_msg or "JSONDecodeError" in error_msg or "EOF" in error_msg:
+                        time.sleep(2)
+                        continue
+                    if "Server listening" in error_msg:
                         if now - self._last_error_time > 300:
                             logger.debug(f"Spotify en modo espera: {error_msg[:50]}")
                             self._last_error_time = now
                         time.sleep(10)
                     else:
                         logger.error(f"Error en monitoreo de Spotify: {e}")
-                        log_service.add_log('error', f'Error en monitoreo de Spotify: {e}', 'spotify_service')
+                        log_service.add_log('error', f'Error en monitoreo de Spotify: {e}', 'twitch_api')
                         time.sleep(5)
         
         thread = threading.Thread(target=monitor, daemon=True)
         thread.start()
         logger.info("🔍 Monitoreo de Spotify iniciado")
-        log_service.add_log('info', 'Monitoreo de Spotify iniciado', 'spotify_service')
+        log_service.add_log('info', 'Monitoreo de Spotify iniciado', 'bot')
     
     def _check_current_track(self):
         """Verificar si la canción actual cambió"""
@@ -207,7 +215,8 @@ class SpotifyService:
         try:
             current = self.sp.current_user_playing_track()
             
-            if not current or not current.get('is_playing'):
+            # Si current es None o no tiene 'item', no hay reproducción activa
+            if not current or not current.get('item'):
                 return
             
             item = current.get('item', {})
@@ -231,10 +240,19 @@ class SpotifyService:
         except (requests.exceptions.ConnectionError, 
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
+            # Re-lanzar para que el monitor lo maneje
+            raise
+        except json.JSONDecodeError:
+            # No es un error crítico, simplemente no hay datos
             raise
         except Exception as e:
-            logger.error(f"Error en monitoreo: {e}")
-            log_service.add_log('error', f'Error en monitoreo de Spotify: {e}', 'spotify_service')
+            error_msg = str(e)
+            if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+                # Silenciar errores de parsing JSON
+                raise json.JSONDecodeError(error_msg, "", 0)
+            # Para otros errores, loguear y re-lanzar
+            logger.error(f"Error en _check_current_track: {e}")
+            raise
     
     def _safe_api_call(self, func, *args, **kwargs):
         """Ejecuta una llamada a la API de Spotify con manejo de errores de conexión"""
@@ -249,12 +267,15 @@ class SpotifyService:
             now = time.time()
             if now - self._last_error_time > self._error_cooldown:
                 logger.warning(f"⚠️ Spotify no disponible: {e}")
-                log_service.add_log('warning', f'Spotify no disponible: {e}', 'spotify_service')
+                log_service.add_log('warning', f'Spotify no disponible: {e}', 'twitch_api')
                 self._last_error_time = now
+            return None
+        except json.JSONDecodeError:
+            # Silenciar errores de parsing JSON
             return None
         except Exception as e:
             logger.error(f"Error en API de Spotify: {e}")
-            log_service.add_log('error', f'Error en API de Spotify: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error en API de Spotify: {e}', 'twitch_api')
             return None
     
     def search_track(self, query: str) -> Optional[Dict]:
@@ -286,11 +307,11 @@ class SpotifyService:
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
             logger.warning(f"⚠️ Spotify no disponible para búsqueda: {e}")
-            log_service.add_log('warning', f'Spotify no disponible para búsqueda', 'spotify_service')
+            log_service.add_log('warning', f'Spotify no disponible para búsqueda', 'twitch_api')
             return None
         except Exception as e:
             logger.error(f"Error buscando canción: {e}")
-            log_service.add_log('error', f'Error buscando canción "{query}": {e}', 'spotify_service')
+            log_service.add_log('error', f'Error buscando canción "{query}": {e}', 'twitch_api')
             return None
     
     def is_track_in_queue(self, track_id: str) -> bool:
@@ -324,17 +345,17 @@ class SpotifyService:
             volume = max(0, min(100, volume))
             self.sp.volume(volume)
             logger.info(f"Volumen ajustado a {volume}%")
-            log_service.add_log('info', f'Volumen ajustado a {volume}%', 'spotify_service')
+            log_service.add_log('info', f'Volumen ajustado a {volume}%', 'bot')
             return True
         except (requests.exceptions.ConnectionError, 
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
             logger.warning(f"⚠️ Spotify no disponible para ajustar volumen: {e}")
-            log_service.add_log('warning', f'Spotify no disponible para ajustar volumen', 'spotify_service')
+            log_service.add_log('warning', f'Spotify no disponible para ajustar volumen', 'twitch_api')
             return False
         except Exception as e:
             logger.error(f"Error ajustando volumen: {e}")
-            log_service.add_log('error', f'Error ajustando volumen: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error ajustando volumen: {e}', 'twitch_api')
             return False
     
     def get_volume(self) -> Optional[int]:
@@ -351,11 +372,11 @@ class SpotifyService:
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
             logger.warning(f"⚠️ Spotify no disponible para obtener volumen: {e}")
-            log_service.add_log('warning', f'Spotify no disponible para obtener volumen', 'spotify_service')
+            log_service.add_log('warning', f'Spotify no disponible para obtener volumen', 'twitch_api')
             return None
         except Exception as e:
             logger.error(f"Error obteniendo volumen: {e}")
-            log_service.add_log('error', f'Error obteniendo volumen: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error obteniendo volumen: {e}', 'twitch_api')
             return None
     
     def get_track_position_in_history(self, track_id: str) -> int:
@@ -398,17 +419,17 @@ class SpotifyService:
                 'album_art': album_art
             }
             logger.info(f"Canción añadida a la cola: {track_info.get('name')}")
-            log_service.add_log('info', f'Canción añadida a la cola: {track_info.get("name")}', 'spotify_service')
+            log_service.add_log('info', f'Canción añadida a la cola: {track_info.get("name")}', 'bot')
             return True
         except (requests.exceptions.ConnectionError, 
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
             logger.warning(f"⚠️ Spotify no disponible para añadir a cola: {e}")
-            log_service.add_log('warning', f'Spotify no disponible para añadir a cola', 'spotify_service')
+            log_service.add_log('warning', f'Spotify no disponible para añadir a cola', 'twitch_api')
             return False
         except Exception as e:
             logger.error(f"Error añadiendo a la cola: {e}")
-            log_service.add_log('error', f'Error añadiendo a la cola: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error añadiendo a la cola: {e}', 'twitch_api')
             return False
     
     def get_current_track(self) -> Optional[Dict]:
@@ -435,12 +456,16 @@ class SpotifyService:
             now = time.time()
             if now - self._last_error_time > self._error_cooldown:
                 logger.warning(f"⚠️ Spotify no disponible para obtener canción actual: {e}")
-                log_service.add_log('warning', f'Spotify no disponible (posiblemente cerrado)', 'spotify_service')
+                log_service.add_log('warning', f'Spotify no disponible (posiblemente cerrado)', 'twitch_api')
                 self._last_error_time = now
             return None
         except Exception as e:
+            error_msg = str(e)
+            if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+                # Silenciar errores de parsing JSON
+                return None
             logger.error(f"Error obteniendo canción actual: {e}")
-            log_service.add_log('error', f'Error obteniendo canción actual: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error obteniendo canción actual: {e}', 'twitch_api')
             return None
     
     def skip_track(self) -> bool:
@@ -458,17 +483,20 @@ class SpotifyService:
             self.sp.next_track()
             self.current_track_id = None
             logger.info("⏭️ Saltando a siguiente canción")
-            log_service.add_log('info', 'Saltando a siguiente canción', 'spotify_service')
+            log_service.add_log('info', 'Saltando a siguiente canción', 'bot')
             return True
         except (requests.exceptions.ConnectionError, 
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
             logger.warning(f"⚠️ Spotify no disponible para saltar: {e}")
-            log_service.add_log('warning', f'Spotify no disponible para saltar', 'spotify_service')
+            log_service.add_log('warning', f'Spotify no disponible para saltar', 'twitch_api')
             return False
         except Exception as e:
+            error_msg = str(e)
+            if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+                return False
             logger.error(f"Error saltando: {e}")
-            log_service.add_log('error', f'Error saltando canción: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error saltando canción: {e}', 'twitch_api')
             return False
     
     def previous_track(self) -> bool:
@@ -480,17 +508,20 @@ class SpotifyService:
             self.sp.previous_track()
             self.current_track_id = None
             logger.info("⏮️ Volviendo a canción anterior")
-            log_service.add_log('info', 'Volviendo a canción anterior', 'spotify_service')
+            log_service.add_log('info', 'Volviendo a canción anterior', 'bot')
             return True
         except (requests.exceptions.ConnectionError, 
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
             logger.warning(f"⚠️ Spotify no disponible para ir a anterior: {e}")
-            log_service.add_log('warning', f'Spotify no disponible para ir a anterior', 'spotify_service')
+            log_service.add_log('warning', f'Spotify no disponible para ir a anterior', 'twitch_api')
             return False
         except Exception as e:
+            error_msg = str(e)
+            if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+                return False
             logger.error(f"Error yendo a canción anterior: {e}")
-            log_service.add_log('error', f'Error yendo a canción anterior: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error yendo a canción anterior: {e}', 'twitch_api')
             return False
     
     def pause_playback(self) -> bool:
@@ -501,17 +532,20 @@ class SpotifyService:
         try:
             self.sp.pause_playback()
             logger.info("⏸️ Reproducción pausada")
-            log_service.add_log('info', 'Reproducción pausada', 'spotify_service')
+            log_service.add_log('info', 'Reproducción pausada', 'bot')
             return True
         except (requests.exceptions.ConnectionError, 
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
             logger.warning(f"⚠️ Spotify no disponible para pausar: {e}")
-            log_service.add_log('warning', f'Spotify no disponible para pausar', 'spotify_service')
+            log_service.add_log('warning', f'Spotify no disponible para pausar', 'twitch_api')
             return False
         except Exception as e:
+            error_msg = str(e)
+            if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+                return False
             logger.error(f"Error pausando: {e}")
-            log_service.add_log('error', f'Error pausando reproducción: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error pausando reproducción: {e}', 'twitch_api')
             return False
     
     def resume_playback(self) -> bool:
@@ -522,17 +556,20 @@ class SpotifyService:
         try:
             self.sp.start_playback()
             logger.info("▶️ Reproducción reanudada")
-            log_service.add_log('info', 'Reproducción reanudada', 'spotify_service')
+            log_service.add_log('info', 'Reproducción reanudada', 'bot')
             return True
         except (requests.exceptions.ConnectionError, 
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
             logger.warning(f"⚠️ Spotify no disponible para reanudar: {e}")
-            log_service.add_log('warning', f'Spotify no disponible para reanudar', 'spotify_service')
+            log_service.add_log('warning', f'Spotify no disponible para reanudar', 'twitch_api')
             return False
         except Exception as e:
+            error_msg = str(e)
+            if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+                return False
             logger.error(f"Error reanudando: {e}")
-            log_service.add_log('error', f'Error reanudando reproducción: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error reanudando reproducción: {e}', 'twitch_api')
             return False
     
     def is_playing(self) -> bool:
@@ -554,7 +591,7 @@ class SpotifyService:
         """Detener monitoreo"""
         self._monitoring = False
         logger.info("🛑 Monitoreo de Spotify detenido")
-        log_service.add_log('info', 'Monitoreo de Spotify detenido', 'spotify_service')
+        log_service.add_log('info', 'Monitoreo de Spotify detenido', 'bot')
     
     def get_playback_state(self) -> Dict:
         """Obtener estado completo de reproducción con progreso y duración"""
@@ -589,8 +626,11 @@ class SpotifyService:
                 ConnectionError) as e:
             return {'is_playing': False, 'device': None, 'track': None, 'volume': None}
         except Exception as e:
+            error_msg = str(e)
+            if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+                return {'is_playing': False, 'device': None, 'track': None, 'volume': None}
             logger.error(f"Error obteniendo estado de reproducción: {e}")
-            log_service.add_log('error', f'Error obteniendo estado de reproducción: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error obteniendo estado de reproducción: {e}', 'twitch_api')
             return {'is_playing': False, 'device': None, 'track': None, 'volume': None}
     
     def seek(self, position_ms: int) -> bool:
@@ -600,17 +640,20 @@ class SpotifyService:
         try:
             self.sp.seek_track(position_ms)
             logger.info(f"⏩ Seek a {position_ms}ms")
-            log_service.add_log('info', f'Seek a {position_ms}ms', 'spotify_service')
+            log_service.add_log('info', f'Seek a {position_ms}ms', 'bot')
             return True
         except (requests.exceptions.ConnectionError, 
                 requests.exceptions.Timeout,
                 ConnectionError) as e:
             logger.warning(f"⚠️ Spotify no disponible para seek: {e}")
-            log_service.add_log('warning', f'Spotify no disponible para seek', 'spotify_service')
+            log_service.add_log('warning', f'Spotify no disponible para seek', 'twitch_api')
             return False
         except Exception as e:
+            error_msg = str(e)
+            if "Expecting value" in error_msg or "JSONDecodeError" in error_msg:
+                return False
             logger.error(f"Error en seek: {e}")
-            log_service.add_log('error', f'Error en seek: {e}', 'spotify_service')
+            log_service.add_log('error', f'Error en seek: {e}', 'twitch_api')
             return False
 
 

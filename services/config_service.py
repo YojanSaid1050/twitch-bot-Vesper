@@ -1,5 +1,5 @@
 import json
-from pathlib import Path
+import threading
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
@@ -8,12 +8,11 @@ from services.log_service import log_service
 
 logger = get_logger(__name__)
 
-CONFIG_PATH = Path(__file__).parent.parent / "data" / "config.json"
-
 
 class ConfigService:
     _instance = None
     _initialized = False
+    _lock = threading.Lock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -23,26 +22,12 @@ class ConfigService:
     def __init__(self):
         if not ConfigService._initialized:
             self.config = {}
+            self._callbacks = []
             self._load_config()
             ConfigService._initialized = True
-            self._callbacks = []
-
-    def _load_config(self):
-        try:
-            if CONFIG_PATH.exists():
-                with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                    self.config = json.load(f)
-                logger.info("Configuración cargada")
-            else:
-                self.config = self._get_default_config()
-                self._save_config()
-                logger.info("Configuración por defecto creada")
-        except Exception as e:
-            logger.error(f"Error cargando configuración: {e}")
-            log_service.add_log('error', f'Error cargando configuración: {e}', 'config_service')
-            self.config = self._get_default_config()
 
     def _get_default_config(self) -> Dict:
+        """Estructura de configuración por defecto."""
         return {
             "dashboard": {
                 "enabled": True,
@@ -88,15 +73,34 @@ class ConfigService:
             }
         }
 
-    def _save_config(self):
+    def _load_config(self):
+        """Carga la configuración exclusivamente desde PostgreSQL."""
         try:
-            CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-                json.dump(self.config, f, indent=4, ensure_ascii=False)
-            self._notify_change()
+            from database.config_repository import ConfigRepository
+            pg_config = ConfigRepository.get_config()
+            if pg_config:
+                self.config = pg_config
+                logger.info("Configuración cargada desde PostgreSQL")
+                return
         except Exception as e:
-            logger.error(f"Error guardando configuración: {e}")
-            log_service.add_log('error', f'Error guardando configuración: {e}', 'config_service')
+            logger.warning(f"No se pudo cargar desde PostgreSQL: {e}")
+
+        # Si no hay datos en PostgreSQL, usar valores por defecto y guardarlos
+        logger.info("No hay configuración en PostgreSQL. Creando valores por defecto...")
+        self.config = self._get_default_config()
+        self._save_config()
+
+    def _save_config(self):
+        """Guarda la configuración exclusivamente en PostgreSQL."""
+        with self._lock:
+            try:
+                from database.config_repository import ConfigRepository
+                ConfigRepository.save_config(self.config)
+                logger.debug("Configuración guardada en PostgreSQL")
+            except Exception as e:
+                logger.error(f"Error guardando configuración en PostgreSQL: {e}")
+                log_service.add_log('error', f'Error guardando configuración en PostgreSQL: {e}', 'config_service')
+            self._notify_change()
 
     def _notify_change(self):
         for callback in self._callbacks:
@@ -232,18 +236,18 @@ class ConfigService:
             'cooldown': cooldown,
             'created_at': datetime.now().isoformat()
         }
-        log_service.add_log('info', f'Comando personalizado creado: !{name}', 'config_service')
+        log_service.add_log('info', f'Comando personalizado creado: !{name}', 'dashboard')
         return self.set('custom_commands', commands)
 
     def remove_custom_command(self, name: str) -> bool:
         commands = self.get_custom_commands()
         if name in commands:
             del commands[name]
-            log_service.add_log('info', f'Comando personalizado eliminado: !{name}', 'config_service')
+            log_service.add_log('info', f'Comando personalizado eliminado: !{name}', 'dashboard')
             return self.set('custom_commands', commands)
         return False
 
-    # ---- WARNINGS (sistema de warns por staff) ----
+    # ---- WARNINGS ----
     def add_warning(self, user_id: str, user_name: str, reason: str, warned_by: str) -> int:
         warnings = self.get('warnings', [])
         warning_id = len(warnings) + 1
@@ -256,7 +260,7 @@ class ConfigService:
             'warned_at': datetime.now().isoformat()
         })
         self.set('warnings', warnings)
-        log_service.add_log('info', f'Advertencia añadida a {user_name}: {reason}', 'config_service')
+        log_service.add_log('warning', f'Advertencia añadida a {user_name}: "{reason}" por {warned_by}', 'moderation')
         return warning_id
 
     def get_warnings(self, user_id: str) -> List[Dict]:
@@ -268,7 +272,7 @@ class ConfigService:
         count = len([w for w in warnings if w.get('user_id') == user_id])
         warnings = [w for w in warnings if w.get('user_id') != user_id]
         self.set('warnings', warnings)
-        log_service.add_log('info', f'Advertencias limpiadas para usuario {user_id} ({count})', 'config_service')
+        log_service.add_log('info', f'Advertencias limpiadas para usuario {user_id} ({count} eliminadas)', 'moderation')
         return count
 
     # ---- SPOTIFY ----
@@ -288,7 +292,6 @@ class ConfigService:
     def add_stats_snapshot(self, followers: int, subscribers: int, cheers: int) -> bool:
         now = datetime.now().isoformat()
         history = self.get('stats_history', [])
-        
         if history:
             last = history[-1]
             try:
@@ -297,18 +300,30 @@ class ConfigService:
                     return False
             except:
                 pass
-        
         history.append({
             'timestamp': now,
             'followers': followers,
             'subscribers': subscribers,
             'cheers': cheers
         })
-        
         if len(history) > 100:
             history = history[-100:]
-        
         return self.set('stats_history', history)
 
+    # ---- LINK MANAGEMENT ----
+    def get_link_management(self) -> Dict:
+        return self.get('link_management', {})
 
+    def set_link_management(self, data: Dict) -> bool:
+        return self.set('link_management', data)
+
+    # ---- WARNING MANAGER ----
+    def get_warning_manager_data(self) -> Dict:
+        return self.get('warning_manager', {})
+
+    def set_warning_manager_data(self, data: Dict) -> bool:
+        return self.set('warning_manager', data)
+
+
+# Instancia global
 config_service = ConfigService()

@@ -29,7 +29,7 @@ class NotificationService:
         if bot.connected_channels:
             self.channel = bot.connected_channels[0]
             logger.info(f"📺 Canal establecido: {self.channel.name}")
-            log_service.add_log('info', f'Canal establecido: {self.channel.name}', 'notification_service')
+            log_service.add_log('info', f'Canal establecido: {self.channel.name}', 'bot')
     
     async def _get_channel(self):
         if self.channel:
@@ -55,12 +55,12 @@ class NotificationService:
                     await asyncio.sleep(30)
                 except Exception as e:
                     logger.error(f"Error en polling de follows: {e}")
-                    log_service.add_log('error', f'Error en polling de follows: {e}', 'notification_service')
+                    log_service.add_log('error', f'Error en polling de follows: {e}', 'bot')
                     await asyncio.sleep(60)
         
         self._polling_task = asyncio.create_task(poll_follows())
         logger.info("✅ Polling de follows iniciado (cada 30 segundos)")
-        log_service.add_log('info', 'Polling de follows iniciado', 'notification_service')
+        log_service.add_log('info', 'Polling de follows iniciado', 'bot')
     
     async def _load_initial_followers(self):
         try:
@@ -89,18 +89,18 @@ class NotificationService:
                     if user_id and user_name:
                         self.known_followers[user_id] = user_name
                 logger.info(f"📊 Cargados {len(self.known_followers)} seguidores iniciales")
-                log_service.add_log('info', f'Cargados {len(self.known_followers)} seguidores iniciales', 'notification_service')
+                log_service.add_log('info', f'Cargados {len(self.known_followers)} seguidores iniciales', 'bot')
                 if self.known_followers:
                     logger.info(f"   Primeros seguidores: {list(self.known_followers.values())[:5]}")
             elif response.status_code == 401:
                 logger.error("❌ Token expirado o sin permisos para cargar seguidores")
-                log_service.add_log('error', 'Token expirado o sin permisos para cargar seguidores', 'notification_service')
+                log_service.add_log('error', 'Token expirado o sin permisos para cargar seguidores', 'bot')
             else:
                 logger.warning(f"⚠️ Error cargando seguidores: {response.status_code}")
-                log_service.add_log('warning', f'Error cargando seguidores: {response.status_code}', 'notification_service')
+                log_service.add_log('warning', f'Error cargando seguidores: {response.status_code}', 'bot')
         except Exception as e:
             logger.error(f"Error cargando seguidores iniciales: {e}")
-            log_service.add_log('error', f'Error cargando seguidores iniciales: {e}', 'notification_service')
+            log_service.add_log('error', f'Error cargando seguidores iniciales: {e}', 'bot')
     
     async def _check_new_follows(self):
         channel = await self._get_channel()
@@ -139,7 +139,7 @@ class NotificationService:
                             new_followers.append((user_id, user_name))
                     if new_followers:
                         logger.info(f"🎉 Detectados {len(new_followers)} nuevos seguidores!")
-                        log_service.add_log('info', f'Detectados {len(new_followers)} nuevos seguidores', 'notification_service')
+                        log_service.add_log('info', f'Detectados {len(new_followers)} nuevos seguidores', 'stats')
                         for user_id, user_name in new_followers:
                             logger.info(f"   - Nuevo: {user_name} (ID: {user_id})")
                             await self._send_follow_notification(user_name, channel)
@@ -151,30 +151,30 @@ class NotificationService:
                     logger.info(f"📊 Lista de seguidores actualizada: {len(self.known_followers)}")
             elif response.status_code == 401:
                 logger.error("❌ Token expirado o sin permisos para verificar follows")
-                log_service.add_log('error', 'Token expirado o sin permisos para verificar follows', 'notification_service')
+                log_service.add_log('error', 'Token expirado o sin permisos para verificar follows', 'bot')
             else:
                 logger.warning(f"⚠️ Error en API: {response.status_code}")
-                log_service.add_log('warning', f'Error en API al verificar follows: {response.status_code}', 'notification_service')
+                log_service.add_log('warning', f'Error en API al verificar follows: {response.status_code}', 'bot')
         except Exception as e:
             logger.error(f"Error verificando follows: {e}")
-            log_service.add_log('error', f'Error verificando follows: {e}', 'notification_service')
+            log_service.add_log('error', f'Error verificando follows: {e}', 'bot')
     
     async def _send_follow_notification(self, user_name: str, channel):
         try:
             message = f"🕯️ Una nueva alma se une al ritual... ¡Bienvenido, {user_name}! Que la oscuridad te guíe."
             await channel.send(message)
             logger.info(f"📢 Notificación de follow enviada: {user_name}")
-            log_service.add_log('info', f'Notificación de follow enviada para {user_name}', 'notification_service')
+            log_service.add_log('info', f'Notificación de follow enviada para {user_name}', 'stats')
         except Exception as e:
             logger.error(f"Error enviando notificación: {e}")
-            log_service.add_log('error', f'Error enviando notificación de follow: {e}', 'notification_service')
+            log_service.add_log('error', f'Error enviando notificación de follow: {e}', 'bot')
     
     def stop_polling(self):
         self._polling_active = False
         if self._polling_task:
             self._polling_task.cancel()
         logger.info("🛑 Polling de follows detenido")
-        log_service.add_log('info', 'Polling de follows detenido', 'notification_service')
+        log_service.add_log('info', 'Polling de follows detenido', 'bot')
 
 
 # Instancia global

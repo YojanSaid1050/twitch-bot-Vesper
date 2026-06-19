@@ -43,10 +43,10 @@ class AntiSpam:
             words = config_service.get_banned_words()
             self.banned_words = set(word.lower() for word in words)
             logger.debug(f"Palabras prohibidas cargadas: {len(self.banned_words)}")
-            log_service.add_log('info', f'Palabras prohibidas cargadas: {len(self.banned_words)}', 'anti_spam')
+            log_service.add_log('info', f'Palabras prohibidas cargadas: {len(self.banned_words)}', 'bot')
         except Exception as e:
             logger.error(f"Error cargando palabras prohibidas: {e}")
-            log_service.add_log('error', f'Error cargando palabras prohibidas: {e}', 'anti_spam')
+            log_service.add_log('error', f'Error cargando palabras prohibidas: {e}', 'bot')
             self.banned_words = set()
     
     def clean_message(self, text: str) -> str:
@@ -80,7 +80,7 @@ class AntiSpam:
             caps_ratio = caps_count / len(message) if len(message) > 0 else 0
             
             if caps_ratio > self.MAX_CAPS_RATIO and len(message) > 10:
-                log_service.add_log('warning', f'Exceso de mayúsculas detectado de usuario {user_id}', 'anti_spam')
+                log_service.add_log('warning', f'Exceso de mayúsculas detectado de usuario {user_id}', 'moderation')
                 action, count = warning_manager.check_and_get_action(user_id, 'caps')
                 return True, action, 'caps', f"EXCESO_MAYUSCULAS (advertencia {count})"
         
@@ -90,7 +90,7 @@ class AntiSpam:
         self.user_messages[user_id] = user_timestamps
         
         if len(user_timestamps) >= self.MAX_MESSAGES_PER_MINUTE:
-            log_service.add_log('warning', f'Rate limit excedido para usuario {user_id}', 'anti_spam')
+            log_service.add_log('warning', f'Rate limit excedido para usuario {user_id}', 'moderation')
             action, count = warning_manager.check_and_get_action(user_id, 'rate')
             return True, action, 'rate', f"RATE_LIMIT (advertencia {count})"
         
@@ -102,7 +102,7 @@ class AntiSpam:
             
             if self.user_similar_count[user_id] >= self.MAX_SIMILAR_MESSAGES:
                 self.user_similar_count[user_id] = 0
-                log_service.add_log('warning', f'Mensaje repetido detectado de usuario {user_id}', 'anti_spam')
+                log_service.add_log('warning', f'Mensaje repetido detectado de usuario {user_id}', 'moderation')
                 action, count = warning_manager.check_and_get_action(user_id, 'repeat')
                 return True, action, 'repeat', f"MENSAJE_REPETIDO (advertencia {count})"
         else:
@@ -113,7 +113,7 @@ class AntiSpam:
             words = clean_msg.split()
             for word in words:
                 if word in self.banned_words:
-                    log_service.add_log('warning', f'Palabra prohibida "{word}" detectada de usuario {user_id}', 'anti_spam')
+                    log_service.add_log('warning', f'Palabra prohibida "{word}" detectada de usuario {user_id}', 'moderation')
                     action, count = warning_manager.check_and_get_action(user_id, 'word')
                     return True, action, 'word', f"PALABRA_PROHIBIDA: {word} (advertencia {count})"
         
@@ -127,7 +127,7 @@ class AntiSpam:
         """Recargar palabras prohibidas (público)"""
         self._load_banned_words()
         logger.info(f"🔄 Palabras prohibidas recargadas: {len(self.banned_words)}")
-        log_service.add_log('info', f'Palabras prohibidas recargadas: {len(self.banned_words)}', 'anti_spam')
+        log_service.add_log('info', f'Palabras prohibidas recargadas: {len(self.banned_words)}', 'moderation')
 
 
 anti_spam = AntiSpam()

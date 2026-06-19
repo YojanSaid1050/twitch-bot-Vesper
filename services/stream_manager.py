@@ -5,9 +5,9 @@ Gestión del stream (título, categoría, markers)
 from typing import Optional, Tuple
 from config import settings
 from services.twitch_api import TwitchAPI
+from services.log_service import log_service
 from exceptions import TwitchAPIError, ResourceNotFoundError
 from utils.logger import get_logger
-from services.log_service import log_service
 
 logger = get_logger(__name__)
 
@@ -29,11 +29,16 @@ class StreamManager:
                 params={"broadcaster_id": self.broadcaster_id},
                 json={"title": title}
             )
-            log_service.add_log('info', f'Título del stream actualizado: "{title}"', 'stream_manager')
+            # Log de éxito (moderación)
+            log_service.add_log('info', f'Título del stream actualizado: "{title}"', 'moderation')
             return response is None
-        except Exception as e:
+        except TwitchAPIError as e:
             logger.error(f"Error actualizando título: {e}")
-            log_service.add_log('error', f'Error actualizando título: {e}', 'stream_manager')
+            log_service.add_log('error', f'Error actualizando título: {e.message}', 'twitch_api')
+            raise
+        except Exception as e:
+            logger.error(f"Error inesperado actualizando título: {e}")
+            log_service.add_log('error', f'Error inesperado actualizando título: {e}', 'bot')
             raise
     
     async def update_game(self, game_name: str) -> Tuple[str, str]:
@@ -45,7 +50,7 @@ class StreamManager:
             )
             data = search_result.get("data", [])
             if not data:
-                log_service.add_log('warning', f'Categoría no encontrada: {game_name}', 'stream_manager')
+                log_service.add_log('warning', f'Categoría no encontrada: {game_name}', 'twitch_api')
                 raise ResourceNotFoundError(f"No se encontró la categoría: {game_name}")
             
             game_lower = game_name.lower()
@@ -79,11 +84,19 @@ class StreamManager:
                 params={"broadcaster_id": self.broadcaster_id},
                 json={"game_id": game_id}
             )
-            log_service.add_log('info', f'Juego del stream actualizado: "{actual_name}"', 'stream_manager')
+            # Log de éxito (moderación)
+            log_service.add_log('info', f'Juego del stream actualizado: "{actual_name}"', 'moderation')
             return game_id, actual_name
-        except Exception as e:
+        except ResourceNotFoundError:
+            # Ya se registró el warning, solo relanzamos
+            raise
+        except TwitchAPIError as e:
             logger.error(f"Error actualizando juego: {e}")
-            log_service.add_log('error', f'Error actualizando juego: {e}', 'stream_manager')
+            log_service.add_log('error', f'Error actualizando juego: {e.message}', 'twitch_api')
+            raise
+        except Exception as e:
+            logger.error(f"Error inesperado actualizando juego: {e}")
+            log_service.add_log('error', f'Error inesperado actualizando juego: {e}', 'bot')
             raise
     
     async def create_marker(self) -> str:
@@ -95,9 +108,13 @@ class StreamManager:
             )
             marker_id = result.get("data", [{}])[0].get("id", "unknown")
             logger.info(f"Marker creado: {marker_id}")
-            log_service.add_log('info', f'Marker creado: {marker_id}', 'stream_manager')
+            log_service.add_log('info', f'Marker creado: {marker_id}', 'bot')  # Sistema
             return marker_id
-        except Exception as e:
+        except TwitchAPIError as e:
             logger.error(f"Error creando marker: {e}")
-            log_service.add_log('error', f'Error creando marker: {e}', 'stream_manager')
+            log_service.add_log('error', f'Error creando marker: {e.message}', 'twitch_api')
+            raise
+        except Exception as e:
+            logger.error(f"Error inesperado creando marker: {e}")
+            log_service.add_log('error', f'Error inesperado creando marker: {e}', 'bot')
             raise

@@ -5,15 +5,53 @@
 
 {% block content %}
 
-<div class="card full-width">
+<!-- ============================================================ -->
+<!-- PANEL DE CONTROL GLOBAL                                       -->
+<!-- ============================================================ -->
+<div class="card full-width" style="margin-bottom:24px;">
+    <div class="card-header">
+        <div class="card-header-left">
+            <i class="fas fa-sliders-h"></i>
+            <h3>Control de Logs</h3>
+        </div>
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+            <button onclick="clearAllLogs()" class="btn-danger btn-sm">
+                <i class="fas fa-trash" style="font-size:16px;"></i> Limpiar todo
+            </button>
+            <button onclick="refreshAllLogs()" class="btn-primary btn-sm">
+                <i class="fas fa-sync"></i> Refrescar todo
+            </button>
+            <div class="chart-controls" style="display:flex; gap:12px; flex-wrap:wrap;">
+                <label class="chart-check" style="margin:0;">
+                    <input type="checkbox" id="toggle-system" checked>
+                    <span class="checkmark"></span>
+                    <span class="check-label" style="color:var(--info);"><i class="fas fa-circle"></i> Sistema</span>
+                </label>
+                <label class="chart-check" style="margin:0;">
+                    <input type="checkbox" id="toggle-moderation" checked>
+                    <span class="checkmark"></span>
+                    <span class="check-label" style="color:var(--warning);"><i class="fas fa-circle"></i> Moderación</span>
+                </label>
+                <label class="chart-check" style="margin:0;">
+                    <input type="checkbox" id="toggle-stats" checked>
+                    <span class="checkmark"></span>
+                    <span class="check-label" style="color:var(--success);"><i class="fas fa-circle"></i> Estadísticas</span>
+                </label>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========== LOGS DEL SISTEMA ========== -->
+<div class="card full-width" id="panel-system">
     <div class="card-header">
         <div class="card-header-left">
             <i class="fas fa-list-ul"></i>
             <h3>Logs del Sistema</h3>
         </div>
         <div class="logs-header-actions">
-            <button onclick="clearLogs()" class="btn-danger btn-sm">
-                <i class="fas fa-trash"></i> Limpiar
+            <button onclick="clearSystemLogs()" class="btn-danger btn-sm">
+                <i class="fas fa-trash" style="font-size:16px;"></i> Limpiar
             </button>
             <button onclick="refreshLogs()" class="btn-primary btn-sm">
                 <i class="fas fa-sync"></i> Refrescar
@@ -92,8 +130,152 @@
     </div>
 </div>
 
+<!-- ========== LOGS DE MODERACIÓN ========== -->
+<div class="card full-width" style="margin-top:24px;" id="panel-moderation">
+    <div class="card-header">
+        <div class="card-header-left">
+            <i class="fas fa-gavel"></i>
+            <h3>Logs de Moderación</h3>
+        </div>
+        <div class="logs-header-actions">
+            <button onclick="clearModerationLogs()" class="btn-danger btn-sm">
+                <i class="fas fa-trash" style="font-size:16px;"></i> Limpiar
+            </button>
+            <button onclick="refreshModLogs()" class="btn-primary btn-sm">
+                <i class="fas fa-sync"></i> Refrescar
+            </button>
+            <label class="toggle-check">
+                <input type="checkbox" id="mod-auto-refresh-toggle" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-label"><i class="fas fa-sync-alt"></i> Auto</span>
+            </label>
+        </div>
+    </div>
+    <div class="card-body">
+
+        <!-- Filtros (solo nivel) -->
+        <div class="logs-filters" style="grid-template-columns: 1fr auto;">
+            <div class="filter-group">
+                <label><i class="fas fa-tag"></i> Nivel</label>
+                <select id="mod-filter-level" class="form-control">
+                    <option value="">Todos</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                </select>
+            </div>
+            <div class="filter-actions">
+                <button onclick="applyModFilters()" class="btn-primary">
+                    <i class="fas fa-filter"></i> Aplicar
+                </button>
+            </div>
+        </div>
+
+        <!-- Tabla de logs de moderación -->
+        <div class="table-wrapper logs-table">
+            <table class="table" id="mod-logs-table">
+                <thead>
+                    <tr>
+                        <th style="width:80px;">Nivel</th>
+                        <th style="width:180px;">Timestamp</th>
+                        <th>Mensaje</th>
+                    </tr>
+                </thead>
+                <tbody id="mod-logs-body">
+                    <tr>
+                        <td colspan="3" class="text-center" style="color:var(--text-muted); padding:40px;">
+                            <i class="fas fa-spinner fa-spin" style="font-size:24px; display:block; margin-bottom:12px;"></i>
+                            Cargando logs de moderación...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="logs-footer">
+            <span><i class="fas fa-file-alt"></i> Mostrando <span id="mod-logs-count">0</span> registros</span>
+            <span id="mod-logs-auto-status" style="font-size:12px; color:var(--text-muted);">
+                <i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)
+            </span>
+        </div>
+    </div>
+</div>
+
+<!-- ========== LOGS DE ESTADÍSTICAS ========== -->
+<div class="card full-width" style="margin-top:24px;" id="panel-stats">
+    <div class="card-header">
+        <div class="card-header-left">
+            <i class="fas fa-chart-bar"></i>
+            <h3>Logs de Estadísticas</h3>
+        </div>
+        <div class="logs-header-actions">
+            <button onclick="clearStatsLogs()" class="btn-danger btn-sm">
+                <i class="fas fa-trash" style="font-size:16px;"></i> Limpiar
+            </button>
+            <button onclick="refreshStatsLogs()" class="btn-primary btn-sm">
+                <i class="fas fa-sync"></i> Refrescar
+            </button>
+            <label class="toggle-check">
+                <input type="checkbox" id="stats-auto-refresh-toggle" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-label"><i class="fas fa-sync-alt"></i> Auto</span>
+            </label>
+        </div>
+    </div>
+    <div class="card-body">
+
+        <!-- Filtros (solo nivel) -->
+        <div class="logs-filters" style="grid-template-columns: 1fr auto;">
+            <div class="filter-group">
+                <label><i class="fas fa-tag"></i> Nivel</label>
+                <select id="stats-filter-level" class="form-control">
+                    <option value="">Todos</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                </select>
+            </div>
+            <div class="filter-actions">
+                <button onclick="applyStatsFilters()" class="btn-primary">
+                    <i class="fas fa-filter"></i> Aplicar
+                </button>
+            </div>
+        </div>
+
+        <!-- Tabla de logs de estadísticas -->
+        <div class="table-wrapper logs-table">
+            <table class="table" id="stats-logs-table">
+                <thead>
+                    <tr>
+                        <th style="width:80px;">Nivel</th>
+                        <th style="width:180px;">Timestamp</th>
+                        <th>Mensaje</th>
+                    </tr>
+                </thead>
+                <tbody id="stats-logs-body">
+                    <tr>
+                        <td colspan="3" class="text-center" style="color:var(--text-muted); padding:40px;">
+                            <i class="fas fa-spinner fa-spin" style="font-size:24px; display:block; margin-bottom:12px;"></i>
+                            Cargando logs de estadísticas...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="logs-footer">
+            <span><i class="fas fa-file-alt"></i> Mostrando <span id="stats-logs-count">0</span> registros</span>
+            <span id="stats-logs-auto-status" style="font-size:12px; color:var(--text-muted);">
+                <i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)
+            </span>
+        </div>
+    </div>
+</div>
+
 <!-- ============================================ -->
-<!-- STYLES (específicos de logs)                -->
+<!-- STYLES                                       -->
 <!-- ============================================ -->
 <style>
     /* ---- Header actions ---- */
@@ -165,6 +347,73 @@
     .toggle-check .toggle-label i {
         color: var(--accent);
         font-size: 12px;
+    }
+
+    /* ---- Checkbox tipo chart (para el panel de control) ---- */
+    .chart-controls {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+    .chart-check {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--text-secondary);
+        cursor: pointer;
+        user-select: none;
+        position: relative;
+        padding-left: 26px;
+        min-height: 20px;
+        margin: 0;
+    }
+    .chart-check input {
+        position: absolute;
+        opacity: 0;
+        cursor: pointer;
+        height: 0;
+        width: 0;
+    }
+    .chart-check .checkmark {
+        position: absolute;
+        left: 0;
+        top: 0;
+        height: 18px;
+        width: 18px;
+        background-color: var(--bg-input);
+        border: 2px solid var(--border-color);
+        border-radius: 4px;
+        transition: var(--transition);
+        flex-shrink: 0;
+    }
+    .chart-check:hover input ~ .checkmark {
+        border-color: var(--accent);
+    }
+    .chart-check input:checked ~ .checkmark {
+        background-color: var(--accent);
+        border-color: var(--accent);
+    }
+    .chart-check input:checked ~ .checkmark:after {
+        content: "";
+        position: absolute;
+        left: 5px;
+        top: 1px;
+        width: 5px;
+        height: 10px;
+        border: solid white;
+        border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+    }
+    .chart-check .check-label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-weight: 500;
+    }
+    .chart-check .check-label i {
+        font-size: 10px;
     }
 
     /* ---- Filtros ---- */
@@ -282,6 +531,11 @@
         margin-right: 4px;
     }
 
+    /* ---- Ocultar paneles ---- */
+    .panel-hidden {
+        display: none !important;
+    }
+
     /* ---- Responsive ---- */
     @media (max-width: 768px) {
         .logs-filters {
@@ -321,6 +575,17 @@
         .logs-header-actions .btn-sm {
             font-size: 11px;
             padding: 4px 10px;
+        }
+        .chart-controls {
+            gap: 10px;
+        }
+        .chart-check {
+            font-size: 12px;
+            padding-left: 22px;
+        }
+        .chart-check .checkmark {
+            height: 16px;
+            width: 16px;
         }
     }
     @media (max-width: 480px) {
@@ -378,18 +643,128 @@
             font-size: 10px;
             padding: 3px 8px;
         }
+        .chart-check {
+            font-size: 11px;
+            padding-left: 20px;
+        }
+        .chart-check .checkmark {
+            height: 14px;
+            width: 14px;
+        }
+        .chart-check input:checked ~ .checkmark:after {
+            left: 4px;
+            top: 0px;
+            width: 4px;
+            height: 8px;
+        }
     }
 </style>
 
 <!-- ============================================ -->
-<!-- SCRIPTS (funcionalidad 100% preservada)     -->
+<!-- SCRIPTS                                     -->
 <!-- ============================================ -->
 <script>
+    // --- Mapeo de nombres de fuente a etiquetas amigables ---
+    const sourceLabels = {
+        'main': 'Principal',
+        'bot': 'Bot',
+        'dashboard': 'Dashboard',
+        'token_manager': 'Gestor de tokens',
+        'twitch_api': 'API de Twitch',
+        'config_service': 'Configuración',
+        'spotify_service': 'Spotify',
+        'commercial': 'Comerciales',
+        'clip_service': 'Clips',
+        'service_manager': 'Gestor de servicios',
+        'webhook': 'Webhook',
+        'bot_commands': 'Comandos del bot',
+        'unknown': 'Desconocido',
+        'oauth_manager': 'Gestor OAuth',
+        'stream_manager': 'Gestor de stream',
+        'chat_settings': 'Ajustes de chat',
+        'moderation_actions': 'Acciones de moderación',
+        'warning_manager': 'Gestor de advertencias',
+        'link_manager': 'Gestor de enlaces',
+        'anti_spam': 'Anti-spam',
+        'stats_service': 'Estadísticas',
+        'notification_service': 'Notificaciones',
+        'eventsub_service': 'EventSub',
+        'system': 'Sistema'
+    };
+
+    // --- Variables para logs del sistema ---
     let refreshInterval = null;
     let isLoading = false;
 
+    // --- Variables para logs de moderación ---
+    let modRefreshInterval = null;
+    let modIsLoading = false;
+
+    // --- Variables para logs de estadísticas ---
+    let statsRefreshInterval = null;
+    let statsIsLoading = false;
+
     // ============================================
-    // CARGAR FUENTES (para el filtro)
+    // PANEL DE CONTROL GLOBAL
+    // ============================================
+    function clearAllLogs() {
+    showModal('Confirmar limpieza', '¿Estás seguro de que quieres eliminar <strong>todos</strong> los logs de todos los paneles? Esta acción no se puede deshacer.', 'Limpiar todo', 'Cancelar', 'danger')
+        .then(confirmed => {
+            if (!confirmed) return;
+            fetch('/api/logs/clear', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    showToast('Todos los logs limpiados', 'success');
+                    refreshAllLogs();
+                } else {
+                    showToast('Error: ' + data.error, 'error');
+                }
+            })
+            .catch(() => showToast('Error al limpiar logs', 'error'));
+        });
+}
+    function refreshAllLogs() {
+        refreshLogs();
+        refreshModLogs();
+        refreshStatsLogs();
+        showToast('Todos los paneles actualizados', 'info');
+    }
+
+    // Mostrar/ocultar paneles
+    document.getElementById('toggle-system').addEventListener('change', function() {
+        const panel = document.getElementById('panel-system');
+        if (this.checked) {
+            panel.classList.remove('panel-hidden');
+        } else {
+            panel.classList.add('panel-hidden');
+        }
+    });
+    document.getElementById('toggle-moderation').addEventListener('change', function() {
+        const panel = document.getElementById('panel-moderation');
+        if (this.checked) {
+            panel.classList.remove('panel-hidden');
+        } else {
+            panel.classList.add('panel-hidden');
+        }
+    });
+    document.getElementById('toggle-stats').addEventListener('change', function() {
+        const panel = document.getElementById('panel-stats');
+        if (this.checked) {
+            panel.classList.remove('panel-hidden');
+        } else {
+            panel.classList.add('panel-hidden');
+        }
+    });
+
+    // ============================================
+    // LOGS DEL SISTEMA
     // ============================================
     function loadSources() {
         fetch('/api/logs?limit=1')
@@ -399,10 +774,13 @@
                 const currentValue = select.value;
                 select.innerHTML = '<option value="">Todas</option>';
                 if (data.sources) {
-                    data.sources.forEach(source => {
+                    // Filtrar solo fuentes de sistema (excluir moderation y stats)
+                    const systemSources = data.sources.filter(s => s !== 'moderation' && s !== 'stats');
+                    systemSources.forEach(source => {
                         const opt = document.createElement('option');
                         opt.value = source;
-                        opt.textContent = source;
+                        // Usar etiqueta amigable si existe
+                        opt.textContent = sourceLabels[source] || source;
                         select.appendChild(opt);
                     });
                 }
@@ -411,9 +789,6 @@
             .catch(() => {});
     }
 
-    // ============================================
-    // APLICAR FILTROS Y CARGAR LOGS
-    // ============================================
     function applyFilters() {
         const level = document.getElementById('filter-level').value;
         const source = document.getElementById('filter-source').value;
@@ -424,7 +799,6 @@
     function loadLogs(level, source, limit) {
         if (isLoading) return;
         isLoading = true;
-
         let url = `/api/logs?limit=${limit || 100}`;
         if (level) url += `&level=${level}`;
         if (source) url += `&source=${source}`;
@@ -434,35 +808,23 @@
             .then(data => {
                 const tbody = document.getElementById('logs-body');
                 const count = document.getElementById('logs-count');
-
                 if (!data.logs || data.logs.length === 0) {
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="4" class="text-center" style="color:var(--text-muted); padding:40px;">
-                                <i class="fas fa-inbox" style="font-size:24px; display:block; margin-bottom:8px; opacity:0.4;"></i>
-                                No hay logs para mostrar
-                            </td>
-                        </tr>
-                    `;
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center" style="color:var(--text-muted); padding:40px;"><i class="fas fa-inbox" style="font-size:24px; display:block; margin-bottom:8px; opacity:0.4;"></i>No hay logs para mostrar</td></tr>`;
                     count.textContent = '0';
                     return;
                 }
-
                 count.textContent = data.logs.length;
-                tbody.innerHTML = data.logs.map(log => `
+                tbody.innerHTML = data.logs.map(log => {
+                    const sourceDisplay = sourceLabels[log.source] || log.source || 'unknown';
+                    return `
                     <tr class="log-level-${log.level}">
                         <td><strong>${log.level}</strong></td>
-                        <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">
-                            ${new Date(log.timestamp).toLocaleString()}
-                        </td>
-                        <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">
-                            ${log.source || 'unknown'}
-                        </td>
+                        <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">${new Date(log.timestamp).toLocaleString()}</td>
+                        <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">${sourceDisplay}</td>
                         <td style="word-break:break-word;">${log.message}</td>
                     </tr>
-                `).join('');
+                `}).join('');
 
-                // Actualizar estado del auto-refresh
                 const autoStatus = document.getElementById('logs-auto-status');
                 if (document.getElementById('auto-refresh-toggle').checked) {
                     autoStatus.innerHTML = '<i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)';
@@ -470,65 +832,38 @@
                     autoStatus.innerHTML = '<i class="fas fa-pause"></i> Auto-refresh desactivado';
                 }
             })
-            .catch(err => {
-                console.error('Error cargando logs:', err);
-                document.getElementById('logs-body').innerHTML = `
-                    <tr>
-                        <td colspan="4" class="text-center" style="color:var(--danger); padding:40px;">
-                            <i class="fas fa-exclamation-triangle" style="font-size:24px; display:block; margin-bottom:8px;"></i>
-                            Error al cargar logs
-                        </td>
-                    </tr>
-                `;
-            })
-            .finally(() => {
-                isLoading = false;
-            });
-    }
-
-    // ============================================
-    // REFRESCAR
-    // ============================================
-    function refreshLogs() {
-        applyFilters();
-    }
-
-    // ============================================
-    // LIMPIAR LOGS
-    // ============================================
-    async function clearLogs() {
-        const confirmed = await showModal(
-            'Confirmar limpieza',
-            '¿Estás seguro de que quieres eliminar <strong>todos</strong> los logs? Esta acción no se puede deshacer.',
-            'Limpiar',
-            'Cancelar',
-            'danger'
-        );
-        if (!confirmed) return;
-
-        fetch('/api/logs/clear', { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    showToast('Logs limpiados', 'success');
-                    refreshLogs();
-                } else {
-                    showToast('Error: ' + data.error, 'error');
-                }
-            })
             .catch(() => {
-                showToast('Error al limpiar logs', 'error');
+                document.getElementById('logs-body').innerHTML = `<tr><td colspan="4" class="text-center" style="color:var(--danger); padding:40px;"><i class="fas fa-exclamation-triangle" style="font-size:24px; display:block; margin-bottom:8px;"></i>Error al cargar logs</td></tr>`;
+            })
+            .finally(() => { isLoading = false; });
+    }
+
+    function refreshLogs() { applyFilters(); }
+
+    function clearSystemLogs() {
+        showModal('Confirmar limpieza', '¿Estás seguro de que quieres eliminar <strong>todos los logs del sistema</strong>? Los logs de moderación y estadísticas no se verán afectados.', 'Limpiar', 'Cancelar', 'danger')
+            .then(confirmed => {
+                if (!confirmed) return;
+                fetch('/api/logs/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: 'system' })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Logs del sistema limpiados', 'success');
+                        refreshLogs();
+                    } else {
+                        showToast('Error: ' + data.error, 'error');
+                    }
+                })
+                .catch(() => showToast('Error al limpiar logs del sistema', 'error'));
             });
     }
 
-    // ============================================
-    // AUTO-REFRESH
-    // ============================================
     function toggleAutoRefresh(enable) {
-        if (refreshInterval) {
-            clearInterval(refreshInterval);
-            refreshInterval = null;
-        }
+        if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
         if (enable) {
             refreshInterval = setInterval(refreshLogs, 10000);
             document.getElementById('logs-auto-status').innerHTML = '<i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)';
@@ -537,16 +872,178 @@
         }
     }
 
-    document.getElementById('auto-refresh-toggle').addEventListener('change', function () {
-        toggleAutoRefresh(this.checked);
-    });
-
-    // ============================================
-    // EVENTOS DE FILTRO
-    // ============================================
+    document.getElementById('auto-refresh-toggle').addEventListener('change', function () { toggleAutoRefresh(this.checked); });
     document.getElementById('filter-level').addEventListener('change', applyFilters);
     document.getElementById('filter-source').addEventListener('change', applyFilters);
     document.getElementById('filter-limit').addEventListener('change', applyFilters);
+
+    // ============================================
+    // LOGS DE MODERACIÓN
+    // ============================================
+    function loadModLogs(level, limit) {
+        if (modIsLoading) return;
+        modIsLoading = true;
+        let url = `/api/logs/moderation?limit=${limit || 100}`;
+        if (level) url += `&level=${level}`;
+
+        fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById('mod-logs-body');
+                const count = document.getElementById('mod-logs-count');
+                if (!data.logs || data.logs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="text-center" style="color:var(--text-muted); padding:40px;"><i class="fas fa-inbox" style="font-size:24px; display:block; margin-bottom:8px; opacity:0.4;"></i>No hay logs de moderación</td></tr>`;
+                    count.textContent = '0';
+                    return;
+                }
+                count.textContent = data.logs.length;
+                tbody.innerHTML = data.logs.map(log => `
+                    <tr class="log-level-${log.level}">
+                        <td><strong>${log.level}</strong></td>
+                        <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">${new Date(log.timestamp).toLocaleString()}</td>
+                        <td style="word-break:break-word;">${log.message}</td>
+                    </tr>
+                `).join('');
+
+                const autoStatus = document.getElementById('mod-logs-auto-status');
+                if (document.getElementById('mod-auto-refresh-toggle').checked) {
+                    autoStatus.innerHTML = '<i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)';
+                } else {
+                    autoStatus.innerHTML = '<i class="fas fa-pause"></i> Auto-refresh desactivado';
+                }
+            })
+            .catch(() => {
+                document.getElementById('mod-logs-body').innerHTML = `<tr><td colspan="3" class="text-center" style="color:var(--danger); padding:40px;"><i class="fas fa-exclamation-triangle" style="font-size:24px; display:block; margin-bottom:8px;"></i>Error al cargar logs de moderación</td></tr>`;
+            })
+            .finally(() => { modIsLoading = false; });
+    }
+
+    function applyModFilters() {
+        const level = document.getElementById('mod-filter-level').value;
+        const limit = 100;
+        loadModLogs(level, limit);
+    }
+
+    function refreshModLogs() { applyModFilters(); }
+
+    function clearModerationLogs() {
+        showModal('Confirmar limpieza', '¿Estás seguro de que quieres eliminar <strong>todos los logs de moderación</strong>? Los logs de sistema y estadísticas no se verán afectados.', 'Limpiar', 'Cancelar', 'danger')
+            .then(confirmed => {
+                if (!confirmed) return;
+                fetch('/api/logs/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: 'moderation' })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Logs de moderación limpiados', 'success');
+                        refreshModLogs();
+                    } else {
+                        showToast('Error: ' + data.error, 'error');
+                    }
+                })
+                .catch(() => showToast('Error al limpiar logs de moderación', 'error'));
+            });
+    }
+
+    function toggleModAutoRefresh(enable) {
+        if (modRefreshInterval) { clearInterval(modRefreshInterval); modRefreshInterval = null; }
+        if (enable) {
+            modRefreshInterval = setInterval(refreshModLogs, 10000);
+            document.getElementById('mod-logs-auto-status').innerHTML = '<i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)';
+        } else {
+            document.getElementById('mod-logs-auto-status').innerHTML = '<i class="fas fa-pause"></i> Auto-refresh desactivado';
+        }
+    }
+
+    document.getElementById('mod-auto-refresh-toggle').addEventListener('change', function () { toggleModAutoRefresh(this.checked); });
+    document.getElementById('mod-filter-level').addEventListener('change', applyModFilters);
+
+    // ============================================
+    // LOGS DE ESTADÍSTICAS
+    // ============================================
+    function loadStatsLogs(level, limit) {
+        if (statsIsLoading) return;
+        statsIsLoading = true;
+        let url = `/api/logs/stats?limit=${limit || 100}`;
+        if (level) url += `&level=${level}`;
+
+        fetch(url)
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById('stats-logs-body');
+                const count = document.getElementById('stats-logs-count');
+                if (!data.logs || data.logs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="text-center" style="color:var(--text-muted); padding:40px;"><i class="fas fa-inbox" style="font-size:24px; display:block; margin-bottom:8px; opacity:0.4;"></i>No hay logs de estadísticas</td></tr>`;
+                    count.textContent = '0';
+                    return;
+                }
+                count.textContent = data.logs.length;
+                tbody.innerHTML = data.logs.map(log => `
+                    <tr class="log-level-${log.level}">
+                        <td><strong>${log.level}</strong></td>
+                        <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">${new Date(log.timestamp).toLocaleString()}</td>
+                        <td style="word-break:break-word;">${log.message}</td>
+                    </tr>
+                `).join('');
+
+                const autoStatus = document.getElementById('stats-logs-auto-status');
+                if (document.getElementById('stats-auto-refresh-toggle').checked) {
+                    autoStatus.innerHTML = '<i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)';
+                } else {
+                    autoStatus.innerHTML = '<i class="fas fa-pause"></i> Auto-refresh desactivado';
+                }
+            })
+            .catch(() => {
+                document.getElementById('stats-logs-body').innerHTML = `<tr><td colspan="3" class="text-center" style="color:var(--danger); padding:40px;"><i class="fas fa-exclamation-triangle" style="font-size:24px; display:block; margin-bottom:8px;"></i>Error al cargar logs de estadísticas</td></tr>`;
+            })
+            .finally(() => { statsIsLoading = false; });
+    }
+
+    function applyStatsFilters() {
+        const level = document.getElementById('stats-filter-level').value;
+        const limit = 100;
+        loadStatsLogs(level, limit);
+    }
+
+    function refreshStatsLogs() { applyStatsFilters(); }
+
+    function clearStatsLogs() {
+        showModal('Confirmar limpieza', '¿Estás seguro de que quieres eliminar <strong>todos los logs de estadísticas</strong>? Los logs de sistema y moderación no se verán afectados.', 'Limpiar', 'Cancelar', 'danger')
+            .then(confirmed => {
+                if (!confirmed) return;
+                fetch('/api/logs/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ category: 'stats' })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Logs de estadísticas limpiados', 'success');
+                        refreshStatsLogs();
+                    } else {
+                        showToast('Error: ' + data.error, 'error');
+                    }
+                })
+                .catch(() => showToast('Error al limpiar logs de estadísticas', 'error'));
+            });
+    }
+
+    function toggleStatsAutoRefresh(enable) {
+        if (statsRefreshInterval) { clearInterval(statsRefreshInterval); statsRefreshInterval = null; }
+        if (enable) {
+            statsRefreshInterval = setInterval(refreshStatsLogs, 10000);
+            document.getElementById('stats-logs-auto-status').innerHTML = '<i class="fas fa-sync-alt"></i> Auto-refresh activado (10s)';
+        } else {
+            document.getElementById('stats-logs-auto-status').innerHTML = '<i class="fas fa-pause"></i> Auto-refresh desactivado';
+        }
+    }
+
+    document.getElementById('stats-auto-refresh-toggle').addEventListener('change', function () { toggleStatsAutoRefresh(this.checked); });
+    document.getElementById('stats-filter-level').addEventListener('change', applyStatsFilters);
 
     // ============================================
     // INICIALIZACIÓN
@@ -555,6 +1052,12 @@
         loadSources();
         applyFilters();
         toggleAutoRefresh(true);
+        // Inicializar logs de moderación
+        applyModFilters();
+        toggleModAutoRefresh(true);
+        // Inicializar logs de estadísticas
+        applyStatsFilters();
+        toggleStatsAutoRefresh(true);
     }
 
     if (document.readyState === 'loading') {
@@ -565,8 +1068,72 @@
 
     window.addEventListener('beforeunload', function () {
         if (refreshInterval) clearInterval(refreshInterval);
+        if (modRefreshInterval) clearInterval(modRefreshInterval);
+        if (statsRefreshInterval) clearInterval(statsRefreshInterval);
     });
-
 </script>
 
 {% endblock %}
+<script>
+// Sobrescribir funciones comunes para usar executeAction
+(function() {
+    // Lista de funciones a proteger (las que ya existen en el contexto global)
+    const functionsToProtect = [
+        'deleteCommand',
+        'removeWord',
+        'removeLink',
+        'clearWarnings',
+        'clearModerationLogs',
+        'clearStatsLogs',
+        'clearSystemLogs',
+        'clearAllLogs',
+        'refreshLogs',
+        'refreshModLogs',
+        'refreshStatsLogs',
+        'refreshAllLogs',
+        'applyFilters',
+        'applyModFilters',
+        'applyStatsFilters',
+        'loadCommands',
+        'loadBannedWords',
+        'loadAllowedLinks',
+        'refreshWarnings',
+        'refreshTimeouts',
+        'refreshBanned',
+        'checkAllUsers',
+        'saveStreamTitle',
+        'saveStreamGame',
+        'saveBotIcon',
+        'saveAvatar',
+        'clearAvatar'
+    ];
+
+    // Para cada función, reemplazarla con una versión que usa executeAction
+    functionsToProtect.forEach(funcName => {
+        const original = window[funcName];
+        if (typeof original === 'function') {
+            window[funcName] = function(...args) {
+                // Generar un ID único para la acción
+                const actionId = funcName + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
+                // Encontrar el botón que disparó la acción (si existe)
+                const button = document.activeElement?.closest('button') || null;
+                return window.executeAction(actionId, () => original(...args), button, 'Procesando...');
+            };
+            console.log('🔒 Función protegida:', funcName);
+        }
+    });
+
+    // Proteger también los envíos de formularios
+    document.querySelectorAll('form[onsubmit]').forEach(form => {
+        const originalSubmit = form.onsubmit;
+        if (originalSubmit) {
+            form.onsubmit = function(e) {
+                e.preventDefault();
+                const actionId = 'form-' + this.id + '-' + Date.now();
+                const button = this.querySelector('button[type="submit"]') || null;
+                return window.executeAction(actionId, () => originalSubmit.call(this, e), button, 'Guardando...');
+            };
+        }
+    });
+})();
+</script>

@@ -47,10 +47,6 @@ class EventHandler:
         if message.echo:
             return
 
-        # No mostramos cada mensaje en consola para evitar ruido, solo los relevantes (comandos, spam, etc.)
-        # Si quieres ver todos los mensajes, descomenta la siguiente línea:
-        # logger.info(f"{message.author.name}: {message.content}")
-
         # Verificar si es staff (mod o broadcaster)
         is_staff = permission_checker.is_staff(message)
         is_vip = message.author.is_vip if hasattr(message.author, 'is_vip') else False
@@ -66,7 +62,7 @@ class EventHandler:
 
             if is_spam:
                 logger.warning(f"🚫 Spam detectado de {message.author.name}: {reason}")
-                log_service.add_log('warning', f'Spam detectado de {message.author.name}: {reason}', 'anti_spam')
+                log_service.add_log('warning', f'Spam detectado de {message.author.name}: {reason}', 'moderation')
                 
                 # Siempre eliminar el mensaje
                 try:
@@ -161,7 +157,7 @@ class EventHandler:
                         f"Quedan {remaining} avisos antes del silencio."
                     )
                     logger.info(f"🚫 Enlace bloqueado de {message.author.name} - Advertencia {count}/{max_w}")
-                    log_service.add_log('info', f'Enlace bloqueado de {message.author.name} - Advertencia {count}', 'link_manager')
+                    log_service.add_log('info', f'Enlace bloqueado de {message.author.name} - Advertencia {count}', 'moderation')
 
                 elif action == 'timeout':
                     try:
@@ -218,26 +214,30 @@ class EventHandler:
         if error_msg and context.channel:
             await context.reply(error_msg)
 
-    # Eventos de notificación (follows, subs, raids) – ya tienen su propia lógica en notification_service
-    # Aquí solo los redirigimos, pero podemos añadir logs más claros.
+    # Eventos de notificación (follows, subs, raids) → estadísticas
     async def event_follow(self, channel, user):
         logger.info(f"⭐ Nuevo follow de {user.name}")
+        log_service.add_log('info', f'Nuevo follow de {user.name}', 'stats')
         await notification_service.on_follow(channel, user)
 
     async def event_subscription(self, channel, user, sub_type, sub_plan, months=None):
         logger.info(f"🎉 Nueva suscripción de {user.name} - {sub_plan}")
+        log_service.add_log('info', f'Nueva suscripción de {user.name} - {sub_plan}', 'stats')
         await notification_service.on_subscribe(channel, user, sub_plan, sub_type)
 
     async def event_raid(self, channel, user, viewers):
         logger.info(f"⚔️ Raid entrante de {user.name} con {viewers} espectadores")
+        log_service.add_log('info', f'Raid entrante de {user.name} con {viewers} espectadores', 'stats')
         await notification_service.on_raid(channel, user, viewers)
 
     async def event_raid_go(self, channel, target, viewers):
         logger.info(f"⚔️ Raid saliente a {target} con {viewers} espectadores")
+        log_service.add_log('info', f'Raid saliente a {target} con {viewers} espectadores', 'stats')
         await notification_service.on_raid_go(channel, target, viewers)
 
     async def event_host(self, channel, user, viewers):
         logger.info(f"🏠 Host de {user.name} con {viewers} espectadores")
+        log_service.add_log('info', f'Host de {user.name} con {viewers} espectadores', 'stats')
         await notification_service.on_host(channel, user, viewers)
 
     async def on_user_join(self, channel, user):
@@ -246,15 +246,15 @@ class EventHandler:
 
     async def on_subscription(self, channel, user, sub_type, sub_plan):
         logger.info(f"🎉 Nuevo suscriptor: {user.name}")
-        log_service.add_log('info', f'Nuevo suscriptor: {user.name}', 'twitch_events')
+        log_service.add_log('info', f'Nuevo suscriptor: {user.name}', 'stats')
         await self.event_subscription(channel, user, sub_type, sub_plan)
 
     async def on_resubscription(self, channel, user, sub_plan, months, message=None):
         logger.info(f"🔄 Re-suscripción: {user.name} - {months} meses")
-        log_service.add_log('info', f'Re-suscripción: {user.name} - {months} meses', 'twitch_events')
+        log_service.add_log('info', f'Re-suscripción: {user.name} - {months} meses', 'stats')
         await self.event_subscription(channel, user, 'resub', sub_plan, months)
 
     async def on_raid(self, channel, user, viewers):
         logger.info(f"⚔️ Raid entrante de {user.name} con {viewers} espectadores")
-        log_service.add_log('info', f'Raid entrante de {user.name} con {viewers} espectadores', 'twitch_events')
+        log_service.add_log('info', f'Raid entrante de {user.name} con {viewers} espectadores', 'stats')
         await self.event_raid(channel, user, viewers)

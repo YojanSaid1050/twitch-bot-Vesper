@@ -233,5 +233,69 @@
             }
         });
     </script>
+
+<script>
+// Sobrescribir funciones comunes para usar executeAction
+(function() {
+    // Lista de funciones a proteger (las que ya existen en el contexto global)
+    const functionsToProtect = [
+        'deleteCommand',
+        'removeWord',
+        'removeLink',
+        'clearWarnings',
+        'clearModerationLogs',
+        'clearStatsLogs',
+        'clearSystemLogs',
+        'clearAllLogs',
+        'refreshLogs',
+        'refreshModLogs',
+        'refreshStatsLogs',
+        'refreshAllLogs',
+        'applyFilters',
+        'applyModFilters',
+        'applyStatsFilters',
+        'loadCommands',
+        'loadBannedWords',
+        'loadAllowedLinks',
+        'refreshWarnings',
+        'refreshTimeouts',
+        'refreshBanned',
+        'checkAllUsers',
+        'saveStreamTitle',
+        'saveStreamGame',
+        'saveBotIcon',
+        'saveAvatar',
+        'clearAvatar'
+    ];
+
+    // Para cada función, reemplazarla con una versión que usa executeAction
+    functionsToProtect.forEach(funcName => {
+        const original = window[funcName];
+        if (typeof original === 'function') {
+            window[funcName] = function(...args) {
+                // Generar un ID único para la acción
+                const actionId = funcName + '-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
+                // Encontrar el botón que disparó la acción (si existe)
+                const button = document.activeElement?.closest('button') || null;
+                return window.executeAction(actionId, () => original(...args), button, 'Procesando...');
+            };
+            console.log('🔒 Función protegida:', funcName);
+        }
+    });
+
+    // Proteger también los envíos de formularios
+    document.querySelectorAll('form[onsubmit]').forEach(form => {
+        const originalSubmit = form.onsubmit;
+        if (originalSubmit) {
+            form.onsubmit = function(e) {
+                e.preventDefault();
+                const actionId = 'form-' + this.id + '-' + Date.now();
+                const button = this.querySelector('button[type="submit"]') || null;
+                return window.executeAction(actionId, () => originalSubmit.call(this, e), button, 'Guardando...');
+            };
+        }
+    });
+})();
+</script>
 </body>
 </html>

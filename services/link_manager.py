@@ -26,9 +26,7 @@ class LinkManager:
     
     def __init__(self):
         self.mod_actions = ModerationActions()
-        # Ya no usamos link_warnings internos, usamos warning_manager
-        # Pero mantenemos algunas estructuras para compatibilidad con el dashboard
-        self.link_warnings: Dict[str, int] = {}  # para dashboard
+        self.link_warnings: Dict[str, int] = {}
         self.warning_users: Dict[str, str] = {}
         self.timeout_users: Dict[str, float] = {}
         self.timeout_user_names: Dict[str, str] = {}
@@ -36,16 +34,13 @@ class LinkManager:
         self.TIMEOUT_DURATION = 600  # 10 minutos
         self.BAN_DURATION = 1209600  # 14 días
         
-        # Cooldown para evitar refrescos en bucle
         self._last_token_refresh = 0
-        self._refresh_cooldown = 120  # 120 segundos entre refrescos
+        self._refresh_cooldown = 120
         
-        # Cache para la API de Twitch
         self._banned_cache = []
         self._banned_cache_time = 0
-        self._banned_cache_ttl = 60  # 60 segundos de caché
+        self._banned_cache_ttl = 60
         
-        # Cargar datos guardados (para compatibilidad con dashboard)
         self._load_data()
     
     def _load_data(self):
@@ -56,12 +51,10 @@ class LinkManager:
             self.warning_users = saved_data.get('warning_users', {})
             self.banned_users = saved_data.get('banned', {})
             
-            # Cargar timeouts guardados
             saved_timeouts = saved_data.get('timeouts', {})
             saved_timeout_names = saved_data.get('timeout_names', {})
             now = time.time()
             
-            # Limpiar timeouts expirados
             for user_id, end_time in list(saved_timeouts.items()):
                 if end_time > now:
                     self.timeout_users[user_id] = end_time
@@ -74,10 +67,10 @@ class LinkManager:
                         del self.warning_users[user_id]
             
             logger.info(f"📊 Datos de enlaces cargados: {len(self.link_warnings)} advertencias, {len(self.banned_users)} baneados, {len(self.timeout_users)} timeouts activos")
-            log_service.add_log('info', f'Datos de enlaces cargados: {len(self.link_warnings)} advertencias', 'link_manager')
+            log_service.add_log('info', f'Datos de enlaces cargados: {len(self.link_warnings)} advertencias', 'bot')
         except Exception as e:
             logger.error(f"Error cargando datos de enlaces: {e}")
-            log_service.add_log('error', f'Error cargando datos de enlaces: {e}', 'link_manager')
+            log_service.add_log('error', f'Error cargando datos de enlaces: {e}', 'bot')
             self.link_warnings = {}
             self.warning_users = {}
             self.banned_users = {}
@@ -105,7 +98,7 @@ class LinkManager:
             })
         except Exception as e:
             logger.error(f"Error guardando datos de enlaces: {e}")
-            log_service.add_log('error', f'Error guardando datos de enlaces: {e}', 'link_manager')
+            log_service.add_log('error', f'Error guardando datos de enlaces: {e}', 'bot')
     
     def _extract_links(self, message: str) -> List[str]:
         """Extraer todos los enlaces de un mensaje"""
@@ -119,11 +112,6 @@ class LinkManager:
     def is_link_allowed(self, link: str) -> bool:
         """
         Verificar si un enlace está permitido
-        
-        Reglas:
-        - Spotify: permitido (spotify.com, open.spotify.com)
-        - Clips de Twitch: permitido (clips.twitch.tv)
-        - Otros dominios: bloqueados por defecto
         """
         try:
             parsed = urlparse(link)
@@ -136,17 +124,15 @@ class LinkManager:
                 if match:
                     domain = match.group()
             
-            # ========== REGLAS ESPECÍFICAS ==========
-            
-            # 1. Spotify: PERMITIDO
+            # Spotify: PERMITIDO
             if 'spotify.com' in domain or 'open.spotify.com' in domain:
                 return True
             
-            # 2. Clips de Twitch: PERMITIDO
+            # Clips de Twitch: PERMITIDO
             if 'clips.twitch.tv' in domain:
                 return True
             
-            # 3. Verificar en la lista de permitidos del dashboard
+            # Verificar en la lista de permitidos del dashboard
             allowed_links = config_service.get_allowed_links()
             for allowed_domain in allowed_links:
                 if allowed_domain in domain:
@@ -155,21 +141,12 @@ class LinkManager:
             return False
         except Exception as e:
             logger.error(f"Error verificando enlace {link}: {e}")
-            log_service.add_log('error', f'Error verificando enlace {link}: {e}', 'link_manager')
+            log_service.add_log('error', f'Error verificando enlace {link}: {e}', 'twitch_api')
             return False
     
     async def check_message(self, user_id: str, user_name: str, message: str, is_staff: bool = False, is_vip: bool = False) -> Optional[Tuple[str, str, List[str]]]:
         """
         Verificar enlaces en el mensaje
-        
-        Returns:
-            (action, reason, blocked_links) o None
-            action: 'warning', 'timeout', 'ban'
-            
-        Sistema de advertencias:
-            - 1ra y 2da: warning + eliminar mensaje
-            - 3ra (según max_warnings): timeout (10 min) + eliminar mensaje
-            - 4ta+ (según max_warnings+1): ban (14 días) + eliminar mensaje
         """
         if is_staff or is_vip:
             return None
@@ -186,16 +163,14 @@ class LinkManager:
         if not blocked_links:
             return None
         
-        # Usar warning_manager para obtener acción
         action, count = warning_manager.check_and_get_action(user_id, 'link')
         
-        # Guardar nombre para dashboard
         self.warning_users[user_id] = user_name
         self.link_warnings[user_id] = count
         self._save_data()
         
-        # Registrar en logs
-        log_service.add_log('info', f'Enlace bloqueado de {user_name} - Advertencia {count}/{warning_manager.get_max_warnings()}', 'link_manager')
+        # Log de detección (moderación)
+        log_service.add_log('info', f'Enlace bloqueado de {user_name} - Advertencia {count}/{warning_manager.get_max_warnings()}', 'moderation')
         
         if action == 'warning':
             return ('warning', f'Enlaces no permitidos - {len(blocked_links)} enlace(s) bloqueado(s)', blocked_links)
@@ -203,7 +178,7 @@ class LinkManager:
             self.timeout_users[user_id] = time.time() + self.TIMEOUT_DURATION
             self.timeout_user_names[user_id] = user_name
             self._save_data()
-            log_service.add_log('warning', f'Timeout a {user_name} por enlaces prohibidos (advertencia {count})', 'link_manager')
+            log_service.add_log('warning', f'Timeout a {user_name} por enlaces prohibidos (advertencia {count})', 'moderation')
             return ('timeout', f'Enlaces no permitidos - {len(blocked_links)} enlace(s) bloqueado(s)', blocked_links)
         else:  # ban
             self.banned_users[user_id] = {
@@ -220,11 +195,11 @@ class LinkManager:
             if user_id in self.timeout_user_names:
                 del self.timeout_user_names[user_id]
             self._save_data()
-            log_service.add_log('critical', f'Ban a {user_name} por enlaces prohibidos (advertencia {count})', 'link_manager')
+            log_service.add_log('critical', f'Ban a {user_name} por enlaces prohibidos (advertencia {count})', 'moderation')
             return ('ban', f'Enlaces no permitidos - {len(blocked_links)} enlace(s) bloqueado(s)', blocked_links)
     
     # ============================================
-    # FUNCIONES DE API DE TWITCH (sin cambios)
+    # FUNCIONES DE API DE TWITCH
     # ============================================
     
     def _get_token(self) -> str:
@@ -242,7 +217,6 @@ class LinkManager:
     def _refresh_token_if_needed(self, token_type: str = "broadcaster") -> bool:
         now = time.time()
         if now - self._last_token_refresh < self._refresh_cooldown:
-            logger.debug(f"⏳ Cooldown de refresh activo ({self._refresh_cooldown}s)")
             return False
         
         self._last_token_refresh = now
@@ -255,7 +229,7 @@ class LinkManager:
                 return token_manager.refresh_bot_token()
         except Exception as e:
             logger.error(f"Error refrescando token: {e}")
-            log_service.add_log('error', f'Error refrescando token en link_manager: {e}', 'link_manager')
+            log_service.add_log('error', f'Error refrescando token en link_manager: {e}', 'token_manager')
             return False
     
     def _get_cached_banned_users(self) -> List[Dict]:
@@ -272,7 +246,7 @@ class LinkManager:
             token = self._get_broadcaster_token()
             if not token:
                 logger.error("No hay token del streamer disponible")
-                log_service.add_log('error', 'No hay token del streamer disponible para obtener baneados', 'link_manager')
+                log_service.add_log('error', 'No hay token del streamer disponible para obtener baneados', 'token_manager')
                 return []
             
             headers = {
@@ -304,7 +278,7 @@ class LinkManager:
                     
                     elif response.status_code == 401:
                         logger.warning("Token del streamer expirado, intentando refrescar...")
-                        log_service.add_log('warning', 'Token del streamer expirado al obtener baneados, refrescando...', 'link_manager')
+                        log_service.add_log('warning', 'Token del streamer expirado al obtener baneados, refrescando...', 'token_manager')
                         if self._refresh_token_if_needed("broadcaster") and max_retries > 0:
                             max_retries -= 1
                             token = self._get_broadcaster_token()
@@ -312,27 +286,27 @@ class LinkManager:
                             continue
                         else:
                             logger.error("No se pudo refrescar el token del streamer")
-                            log_service.add_log('error', 'No se pudo refrescar el token del streamer para baneados', 'link_manager')
+                            log_service.add_log('error', 'No se pudo refrescar el token del streamer para baneados', 'token_manager')
                             break
                     else:
                         logger.error(f"Error obteniendo baneados de Twitch: {response.status_code}")
-                        log_service.add_log('error', f'Error obteniendo baneados de Twitch: {response.status_code}', 'link_manager')
+                        log_service.add_log('error', f'Error obteniendo baneados de Twitch: {response.status_code}', 'twitch_api')
                         break
                         
                 except requests.exceptions.Timeout:
                     logger.error("Timeout al consultar Twitch API")
-                    log_service.add_log('error', 'Timeout al consultar Twitch API para baneados', 'link_manager')
+                    log_service.add_log('error', 'Timeout al consultar Twitch API para baneados', 'twitch_api')
                     break
                 except Exception as e:
                     logger.error(f"Error en petición: {e}")
-                    log_service.add_log('error', f'Error en petición de baneados: {e}', 'link_manager')
+                    log_service.add_log('error', f'Error en petición de baneados: {e}', 'twitch_api')
                     break
             
             logger.info(f"📋 Total de usuarios baneados obtenidos: {len(all_banned)}")
             return all_banned
         except Exception as e:
             logger.error(f"Error obteniendo baneados de Twitch: {e}")
-            log_service.add_log('error', f'Error obteniendo baneados de Twitch: {e}', 'link_manager')
+            log_service.add_log('error', f'Error obteniendo baneados de Twitch: {e}', 'twitch_api')
             return []
     
     def get_twitch_banned_users(self) -> List[Dict]:
@@ -367,7 +341,7 @@ class LinkManager:
             return timeouts
         except Exception as e:
             logger.error(f"Error obteniendo timeouts de Twitch: {e}")
-            log_service.add_log('error', f'Error obteniendo timeouts de Twitch: {e}', 'link_manager')
+            log_service.add_log('error', f'Error obteniendo timeouts de Twitch: {e}', 'twitch_api')
             return []
     
     def is_user_in_timeout(self, user_id: str) -> bool:
@@ -396,7 +370,7 @@ class LinkManager:
             token = self._get_token()
             if not token:
                 logger.error("No hay token del bot disponible")
-                log_service.add_log('error', 'No hay token del bot disponible para remover ban', 'link_manager')
+                log_service.add_log('error', 'No hay token del bot disponible para remover ban', 'token_manager')
                 return False
             
             headers = {
@@ -410,7 +384,7 @@ class LinkManager:
             
             if response.status_code == 204:
                 logger.info(f"✅ Ban removido para usuario {user_id}")
-                log_service.add_log('info', f'Ban removido para usuario {user_id}', 'link_manager')
+                log_service.add_log('info', f'Ban removido para usuario {user_id}', 'moderation')
                 if user_id in self.banned_users:
                     del self.banned_users[user_id]
                 if user_id in self.link_warnings:
@@ -427,17 +401,17 @@ class LinkManager:
                 return True
             elif response.status_code == 401:
                 logger.warning("Token del bot expirado, intentando refrescar...")
-                log_service.add_log('warning', 'Token expirado al remover ban, refrescando...', 'link_manager')
+                log_service.add_log('warning', 'Token expirado al remover ban, refrescando...', 'token_manager')
                 if self._refresh_token_if_needed("bot"):
                     return self.remove_twitch_ban(user_id)
                 return False
             else:
                 logger.error(f"Error removiendo ban: {response.status_code} - {response.text}")
-                log_service.add_log('error', f'Error removiendo ban para {user_id}: {response.status_code}', 'link_manager')
+                log_service.add_log('error', f'Error removiendo ban para {user_id}: {response.status_code}', 'twitch_api')
                 return False
         except Exception as e:
             logger.error(f"Error removiendo ban: {e}")
-            log_service.add_log('error', f'Error removiendo ban para {user_id}: {e}', 'link_manager')
+            log_service.add_log('error', f'Error removiendo ban para {user_id}: {e}', 'twitch_api')
             return False
     
     def remove_twitch_timeout(self, user_id: str) -> bool:
@@ -445,7 +419,7 @@ class LinkManager:
             token = self._get_token()
             if not token:
                 logger.error("No hay token del bot disponible")
-                log_service.add_log('error', 'No hay token del bot disponible para remover timeout', 'link_manager')
+                log_service.add_log('error', 'No hay token del bot disponible para remover timeout', 'token_manager')
                 return False
             
             headers = {
@@ -459,7 +433,7 @@ class LinkManager:
             
             if response.status_code == 204:
                 logger.info(f"✅ Timeout removido para usuario {user_id}")
-                log_service.add_log('info', f'Timeout removido para usuario {user_id}', 'link_manager')
+                log_service.add_log('info', f'Timeout removido para usuario {user_id}', 'moderation')
                 if user_id in self.timeout_users:
                     del self.timeout_users[user_id]
                 if user_id in self.timeout_user_names:
@@ -473,17 +447,17 @@ class LinkManager:
                 return True
             elif response.status_code == 401:
                 logger.warning("Token del bot expirado, intentando refrescar...")
-                log_service.add_log('warning', 'Token expirado al remover timeout, refrescando...', 'link_manager')
+                log_service.add_log('warning', 'Token expirado al remover timeout, refrescando...', 'token_manager')
                 if self._refresh_token_if_needed("bot"):
                     return self.remove_twitch_timeout(user_id)
                 return False
             else:
                 logger.error(f"Error removiendo timeout: {response.status_code} - {response.text}")
-                log_service.add_log('error', f'Error removiendo timeout para {user_id}: {response.status_code}', 'link_manager')
+                log_service.add_log('error', f'Error removiendo timeout para {user_id}: {response.status_code}', 'twitch_api')
                 return False
         except Exception as e:
             logger.error(f"Error removiendo timeout: {e}")
-            log_service.add_log('error', f'Error removiendo timeout para {user_id}: {e}', 'link_manager')
+            log_service.add_log('error', f'Error removiendo timeout para {user_id}: {e}', 'twitch_api')
             return False
     
     def check_user_status(self, user_id: str) -> Dict:
@@ -528,7 +502,7 @@ class LinkManager:
             }
         except Exception as e:
             logger.error(f"Error verificando estado de usuario: {e}")
-            log_service.add_log('error', f'Error verificando estado de usuario {user_id}: {e}', 'link_manager')
+            log_service.add_log('error', f'Error verificando estado de usuario {user_id}: {e}', 'twitch_api')
             return {'banned': False, 'user_id': user_id, 'error': str(e)}
     
     def get_user_name_by_id(self, user_id: str) -> str:
@@ -560,7 +534,7 @@ class LinkManager:
             return user_id
         except Exception as e:
             logger.error(f"Error obteniendo nombre de usuario: {e}")
-            log_service.add_log('error', f'Error obteniendo nombre de usuario {user_id}: {e}', 'link_manager')
+            log_service.add_log('error', f'Error obteniendo nombre de usuario {user_id}: {e}', 'twitch_api')
             return user_id
     
     # ============================================
@@ -568,7 +542,6 @@ class LinkManager:
     # ============================================
     
     def clear_warnings(self, user_id: str) -> int:
-        """Limpiar advertencias de enlaces de un usuario"""
         count = warning_manager.clear_warnings(user_id, 'link')
         if user_id in self.link_warnings:
             del self.link_warnings[user_id]
@@ -576,14 +549,13 @@ class LinkManager:
             del self.warning_users[user_id]
         self._save_data()
         logger.info(f"🧹 Advertencias de enlaces limpiadas para usuario {user_id} ({count})")
-        log_service.add_log('info', f'Advertencias de enlaces limpiadas para usuario {user_id}', 'link_manager')
+        log_service.add_log('info', f'Advertencias de enlaces limpiadas para usuario {user_id}', 'moderation')
         return count
     
     def get_warning_count(self, user_id: str) -> int:
         return warning_manager.get_warning_count(user_id, 'link')
     
     def get_all_warnings(self) -> Dict[str, Dict]:
-        """Obtener todas las advertencias de enlaces con nombres de usuario"""
         result = {}
         for user_id, count in self.link_warnings.items():
             user_name = self.warning_users.get(user_id, user_id)
@@ -609,7 +581,7 @@ class LinkManager:
                 del self.timeout_user_names[user_id]
             self._save_data()
             logger.info(f"🔓 Ban removido para usuario {user_id}")
-            log_service.add_log('info', f'Ban removido (local) para usuario {user_id}', 'link_manager')
+            log_service.add_log('info', f'Ban removido para usuario {user_id}', 'moderation')
             return True
         return False
     
@@ -665,7 +637,7 @@ class LinkManager:
                 del self.timeout_user_names[user_id]
             self._save_data()
             logger.info(f"⏰ Timeout removido para usuario {user_id}")
-            log_service.add_log('info', f'Timeout removido (local) para usuario {user_id}', 'link_manager')
+            log_service.add_log('info', f'Timeout removido para usuario {user_id}', 'moderation')
             return True
         return False
 
@@ -673,7 +645,7 @@ class LinkManager:
         self._banned_cache = []
         self._banned_cache_time = 0
         logger.info("🔄 Caché de baneados forzada a recargar")
-        log_service.add_log('info', 'Caché de baneados forzada a recargar', 'link_manager')
+        log_service.add_log('info', 'Caché de baneados forzada a recargar', 'bot')
 
 
 link_manager = LinkManager()

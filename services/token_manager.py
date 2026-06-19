@@ -10,8 +10,8 @@ from enum import Enum
 from config import settings
 from services.oauth_manager import OAuthManager, TokenType, OAuthError
 from services.token_validator import TokenValidator
-from utils.logger import get_logger
 from services.log_service import log_service
+from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -159,6 +159,7 @@ class TokenManager:
     def start_auto_refresh(self, wait_for_tokens: bool = True):
         """Inicia el sistema de auto-refresh (compatible con la interfaz actual)."""
         logger.info("🔄 Iniciando sistema de auto-refresh de tokens...")
+        log_service.add_log('info', 'Iniciando sistema de auto-refresh de tokens', 'token_manager')
 
         # Intentar refrescar todos al arranque
         self.refresh_all_tokens()
@@ -173,10 +174,12 @@ class TokenManager:
     def wait_for_valid_tokens(self, timeout: int = 60):
         """Espera hasta que los tokens esenciales sean válidos."""
         logger.info(f"⏳ Esperando hasta {timeout}s para que los tokens sean válidos...")
+        log_service.add_log('info', f'Esperando tokens válidos (timeout {timeout}s)', 'token_manager')
         start = time.time()
         while time.time() - start < timeout:
             if self.are_tokens_valid():
                 logger.info("✅ Todos los tokens esenciales son válidos.")
+                log_service.add_log('info', 'Todos los tokens esenciales son válidos', 'token_manager')
                 return
             # Intentar refrescar si alguno está inválido
             for token_type in (TokenType.BOT, TokenType.BROADCASTER):
@@ -186,6 +189,7 @@ class TokenManager:
                         self._refresh_token(token_type)
             time.sleep(2)
         logger.warning(f"⚠️ Timeout esperando tokens válidos después de {timeout}s. Continuando de todos modos.")
+        log_service.add_log('warning', f'Timeout esperando tokens válidos ({timeout}s)', 'token_manager')
 
     def stop_auto_refresh(self):
         """Detiene el scheduler."""
@@ -258,9 +262,10 @@ class TokenManager:
             except OAuthError as e:
                 error_msg = str(e)
                 logger.error(f"❌ Error refrescando {token_type.value}: {error_msg}")
-                log_service.add_log('error', f'Error refrescando {token_type.value}: {error_msg}', 'token_manager')
-                if "refresh token inválido" in error_msg.lower():
+                if "refresh token inválido" in error_msg.lower() or "invalid refresh token" in error_msg.lower():
                     log_service.add_log('critical', f'REFRESH TOKEN EXPIRADO PARA {token_type.value}. NECESITAS REAUTORIZAR.', 'token_manager')
+                else:
+                    log_service.add_log('error', f'Error refrescando {token_type.value}: {error_msg}', 'twitch_api')
                 return False
 
     def _refresh_app_token_internal(self, state: TokenState) -> bool:
@@ -280,7 +285,7 @@ class TokenManager:
                 return True
             except OAuthError as e:
                 logger.error(f"❌ Error refrescando App Token: {e}")
-                log_service.add_log('error', f'Error refrescando App Token: {e}', 'token_manager')
+                log_service.add_log('error', f'Error refrescando App Token: {e}', 'twitch_api')
                 return False
 
     def _refresh_spotify_token_internal(self, state: TokenState) -> bool:
@@ -311,7 +316,7 @@ class TokenManager:
                 return True
             except OAuthError as e:
                 logger.error(f"❌ Error refrescando Spotify: {e}")
-                log_service.add_log('error', f'Error refrescando Spotify: {e}', 'token_manager')
+                log_service.add_log('error', f'Error refrescando Spotify: {e}', 'twitch_api')
                 return False
 
     def _is_token_valid(self, token_type: TokenType) -> bool:
@@ -357,10 +362,12 @@ class TokenManager:
             # Si no hay tokens con expiración, programar un refresh general en 5 minutos
             delay = 5 * 60
             logger.info(f"⏰ No se detectaron expiraciones. Refresh general en {delay//60} minutos.")
+            log_service.add_log('info', f'No se detectaron expiraciones, refresh general en {delay//60}m', 'token_manager')
         else:
             # Programar solo ese token
             delay = max(earliest, 60)  # mínimo 60 segundos
             logger.info(f"⏰ Próximo refresh para {earliest_type.value} en {delay//60} minutos.")
+            log_service.add_log('info', f'Próximo refresh para {earliest_type.value} en {delay//60}m', 'token_manager')
 
         if self._refresh_timer:
             self._refresh_timer.cancel()
