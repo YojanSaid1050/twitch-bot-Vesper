@@ -1,7 +1,7 @@
 # web/webhook.py
 """
-Servidor webhook independiente para EventSub de Twitch
-- Se ejecuta en su propio proceso/hilo
+Servidor webhook para EventSub de Twitch - Integrado con el dashboard
+- Registra las rutas del webhook en la misma aplicación Flask que el dashboard
 - Única responsabilidad: recibir y validar webhooks de Twitch
 - Reenvía eventos al EventSubService
 - No contiene lógica del bot ni de negocio
@@ -12,21 +12,23 @@ import sys
 import time
 import hmac
 import hashlib
-import json
 import threading
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from collections import deque
-from typing import Dict, Optional
+from typing import Optional
 
 # Añadir el directorio raíz al path para importar módulos
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from flask import Flask, request, jsonify, Response, abort
+from flask import request, jsonify, Response, abort
 from utils.logger import get_logger
 from services.log_service import log_service
 from services.eventsub_service import eventsub_service
 from config import settings
+
+# Importar la aplicación del dashboard para registrar las rutas
+from web.dashboard import app
 
 logger = get_logger(__name__)
 
@@ -37,12 +39,12 @@ MAX_MESSAGE_AGE_SECONDS = 600  # 10 minutos
 CACHE_SIZE = 1000
 TWITCH_SECRET = os.getenv("TWITCH_WEBHOOK_SECRET", "")
 
-# ============================================
-# APLICACIÓN FLASK
-# ============================================
-app = Flask(__name__)
+if not TWITCH_SECRET:
+    logger.warning("⚠️ TWITCH_WEBHOOK_SECRET no configurado. Las solicitudes serán rechazadas.")
 
-# Variable global para la instancia del bot
+# ============================================
+# VARIABLE GLOBAL PARA LA INSTANCIA DEL BOT
+# ============================================
 _bot_instance = None
 
 
@@ -52,6 +54,8 @@ def set_bot_instance(bot):
     _bot_instance = bot
     if bot:
         eventsub_service.set_bot(bot)
+        logger.info("🤖 Bot registrado en el webhook")
+        log_service.add_log('info', 'Bot registrado en el webhook', 'webhook')
 
 
 # ============================================
@@ -87,16 +91,16 @@ def verify_signature(message: str, signature: str, secret: str) -> bool:
     if not secret:
         logger.warning("⚠️ TWITCH_WEBHOOK_SECRET vacío, omitiendo verificación")
         return True
-    
+
     expected = hmac.new(
         secret.encode('utf-8'),
         message.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()
-    
+
     if signature.startswith('sha256='):
         signature = signature[7:]
-    
+
     return hmac.compare_digest(expected, signature)
 
 
@@ -118,9 +122,9 @@ def is_timestamp_fresh(timestamp_str: str) -> bool:
         return False
 
 
-# ============================================
-# RUTAS DEL WEBHOOK
-# ============================================
+# ============================================================
+# RUTAS DEL WEBHOOK (registradas en la app del dashboard)
+# ============================================================
 
 @app.route('/twitch/webhook', methods=['POST'])
 def twitch_webhook():
@@ -212,133 +216,22 @@ def twitch_webhook_get():
     return jsonify({"status": "ready", "service": "VesperBot Webhook"}), 200
 
 
-# ============================================
-# RUTAS DE HEALTH CHECK
-# ============================================
-
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check del webhook."""
-    return jsonify({
-        "status": "healthy",
-        "service": "VesperBot Webhook",
-        "timestamp": datetime.now().isoformat(),
-        "version": "2.0",
-        "bot_available": _bot_instance is not None,
-        "cache_size": len(_message_cache._set),
-        "twitch_secret_configured": bool(TWITCH_SECRET)
-    }), 200
-
-
-@app.route('/', methods=['GET'])
-def index():
-    """Raíz del servicio webhook."""
-    return jsonify({
-        "service": "VesperBot Webhook Service",
-        "status": "running",
-        "version": "2.0",
-        "endpoints": {
-            "webhook": "/twitch/webhook",
-            "health": "/health"
-        },
-        "documentation": "https://dev.twitch.tv/docs/eventsub"
-    }), 200
-
-
-# ============================================
-# ERROR HANDLERS
-# ============================================
-
-@app.errorhandler(400)
-def bad_request(e):
-    return jsonify({"error": "Bad Request", "description": str(e.description)}), 400
-
-
-@app.errorhandler(401)
-def unauthorized(e):
-    return jsonify({"error": "Unauthorized", "description": str(e.description)}), 401
-
-
-@app.errorhandler(415)
-def unsupported_media(e):
-    return jsonify({"error": "Unsupported Media Type", "description": str(e.description)}), 415
-
-
-@app.errorhandler(500)
-def internal_error(e):
-    logger.error(f"Error interno: {e}")
-    return jsonify({"error": "Internal Server Error"}), 500
-
-
-# ============================================
-# FUNCIÓN PARA INICIAR EL SERVIDOR
-# ============================================
-
-def run_webhook(port=None, host='0.0.0.0', debug=False):
-    """
-    Inicia el servidor webhook.
-    
-    Args:
-        port: Puerto donde escuchar (por defecto usa PORT de entorno o 10000)
-        host: Host donde escuchar (por defecto 0.0.0.0)
-        debug: Modo debug (por defecto False)
-    """
-    if port is None:
-        port = int(os.getenv("PORT", "10000"))
-    
-    logger.info(f"🚀 Iniciando servidor webhook en {host}:{port}")
-    logger.info(f"📡 Endpoint: /twitch/webhook")
-    
-    app.config['START_TIME'] = datetime.now()
-    app.run(host=host, port=port, debug=debug, use_reloader=False)
-
-
-def run_webhook_in_thread(port=None, host='0.0.0.0', debug=False):
-    """
-    Inicia el servidor webhook en un hilo separado.
-    
-    Returns:
-        threading.Thread: Hilo donde se ejecuta el servidor
-    """
-    if port is None:
-        port = int(os.getenv("PORT", "10000"))
-    
-    thread = threading.Thread(
-        target=run_webhook,
-        args=(port, host, debug),
-        daemon=True,
-        name="WebhookServer"
-    )
-    thread.start()
-    
-    logger.info(f"⏳ Webhook iniciado en hilo separado (puerto {port})")
-    
-    return thread
-
-
-# ============================================
-# FUNCIÓN PARA ESPERAR QUE EL WEBHOOK ESTÉ LISTO
-# ============================================
+# ============================================================
+# FUNCIÓN PARA ESPERAR QUE EL SERVIDOR ESTÉ LISTO
+# ============================================================
 
 def wait_for_webhook_ready(port=None, timeout=60, check_interval=1):
     """
-    Espera a que el webhook esté listo para recibir peticiones.
-    
-    Args:
-        port: Puerto donde escucha el webhook
-        timeout: Tiempo máximo de espera en segundos
-        check_interval: Intervalo entre verificaciones en segundos
-    
-    Returns:
-        bool: True si el webhook está listo, False si timeout
+    Espera a que el servidor combinado (webhook + dashboard) esté listo.
+    Verifica el endpoint /health que está disponible en la app combinada.
     """
     if port is None:
         port = int(os.getenv("PORT", "10000"))
-    
+
     url = f"http://localhost:{port}/health"
-    
-    logger.info(f"⏳ Esperando que el webhook esté listo en {url}...")
-    
+
+    logger.info(f"⏳ Esperando que el servidor webhook esté listo en {url}...")
+
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
@@ -350,22 +243,6 @@ def wait_for_webhook_ready(port=None, timeout=60, check_interval=1):
         except:
             pass
         time.sleep(check_interval)
-    
+
     logger.warning(f"⚠️ Timeout esperando webhook después de {timeout}s")
     return False
-
-
-# ============================================
-# INSTANCIA GLOBAL DE LA APP (para Gunicorn)
-# ============================================
-
-# Si se ejecuta con Gunicorn, se usa esta instancia
-application = app
-
-
-# ============================================
-# EJECUCIÓN DIRECTA
-# ============================================
-
-if __name__ == "__main__":
-    run_webhook()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Twitch Bot - Punto de entrada principal
-Inicia el webhook (integrado en el dashboard) y el bot en el mismo proceso
+Inicia el servidor combinado (webhook + dashboard) y el bot
 """
 
 import os
@@ -9,10 +9,9 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# ===== CARGAR VARIABLES DE ENTORNO ANTES DE CUALQUIER OTRA COSA =====
+# ===== CARGAR VARIABLES DE ENTORNO =====
 load_dotenv()
 
-# Ahora el resto de importaciones
 import signal
 import threading
 import time
@@ -22,7 +21,8 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent))
 
 from bot.client import Bot
-from web.dashboard import run_dashboard, set_bot_instance, wait_for_tokens
+from web.dashboard import app, set_bot_instance, wait_for_tokens
+from web.webhook import set_bot_instance as set_webhook_bot
 from utils.logger import setup_logger
 from services.token_manager import token_manager
 from services.log_service import log_service
@@ -41,26 +41,34 @@ def signal_handler(sig, frame):
     sys.exit(0)
 
 
-def start_dashboard():
-    """Inicia el dashboard en un hilo separado."""
-    max_wait = 60
-    waited = 0
-    while not hasattr(sys.modules['__main__'], 'bot_instance') and waited < max_wait:
+def run_combined_server():
+    """Inicia el servidor combinado (webhook + dashboard) en el puerto asignado."""
+    port = int(os.getenv("PORT", "10000"))
+    logger.info(f"🚀 Iniciando servidor combinado (webhook + dashboard) en el puerto {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+
+def wait_for_server_ready(port=None, timeout=60):
+    """Espera a que el servidor combinado esté listo."""
+    if port is None:
+        port = int(os.getenv("PORT", "10000"))
+    
+    url = f"http://localhost:{port}/health"
+    logger.info(f"⏳ Esperando que el servidor esté listo en {url}...")
+    
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            resp = requests.get(url, timeout=2)
+            if resp.status_code == 200:
+                logger.info("✅ Servidor combinado listo")
+                return True
+        except:
+            pass
         time.sleep(1)
-        waited += 1
-    if waited >= max_wait:
-        logger.warning("⚠️ Dashboard iniciado sin esperar al bot (timeout)")
-        log_service.add_log('warning', 'Dashboard iniciado sin esperar al bot (timeout)', 'main')
-    else:
-        logger.info("✅ Bot listo, esperando tokens válidos...")
-        wait_for_tokens(timeout=60)
-        logger.info("🚀 Iniciando dashboard...")
-        log_service.add_log('info', 'Bot listo, iniciando dashboard', 'main')
-    try:
-        run_dashboard()
-    except Exception as e:
-        logger.error(f"❌ Error en dashboard: {e}")
-        log_service.add_log('critical', f'Error en dashboard: {e}', 'main')
+    
+    logger.warning("⚠️ Timeout esperando servidor")
+    return False
 
 
 def main():
@@ -69,7 +77,6 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # BANNER INICIAL
     print("\n" + "=" * 60)
     print("🕯️  VESPERBOT - RELICARIO DEL VACÍO")
     print("=" * 60)
@@ -85,44 +92,37 @@ def main():
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        logger.info("✅ Event loop creado y establecido para el hilo principal")
-        log_service.add_log('info', 'Event loop creado para el hilo principal', 'main')
+        logger.info("✅ Event loop creado")
+        log_service.add_log('info', 'Event loop creado', 'main')
 
     logger.info(f"📺 Canal: {settings.CHANNEL}")
     logger.info(f"🤖 Bot: {settings.BOT_NICK}")
 
-    # ===== INICIAR DASHBOARD (CONTINE EL WEBHOOK) =====
-    dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
-    dashboard_thread.start()
+    # ============================================================
+    # 1. INICIAR SERVIDOR COMBINADO (webhook + dashboard)
+    # ============================================================
+    server_thread = threading.Thread(target=run_combined_server, daemon=True)
+    server_thread.start()
 
-    # Esperar a que el webhook esté listo (nueva ruta: /twitch/webhook)
-    logger.info("⏳ Esperando que el webhook esté listo...")
-    webhook_ready = False
-    port = os.getenv("PORT", "10000")
-    for attempt in range(1, 31):  # hasta 30 intentos (30 segundos)
-        try:
-            # Nueva ruta del webhook
-            url = f"http://localhost:{port}/twitch/webhook"
-            resp = requests.get(url, timeout=2)
-            if resp.status_code == 200:
-                webhook_ready = True
-                logger.info("✅ Webhook está activo")
-                break
-        except:
-            pass
-        time.sleep(1)
-        if attempt % 5 == 0:
-            logger.info(f"⏳ Intentando conectar al webhook... ({attempt}s)")
+    # ============================================================
+    # 2. ESPERAR A QUE EL SERVIDOR ESTÉ LISTO
+    # ============================================================
+    if wait_for_server_ready(timeout=60):
+        logger.info("✅ Servidor combinado activo")
+        log_service.add_log('info', 'Servidor combinado activo', 'main')
+    else:
+        logger.warning("⚠️ Servidor no disponible, continuando...")
+        log_service.add_log('warning', 'Servidor no disponible', 'main')
 
-    if not webhook_ready:
-        logger.warning("⚠️ Webhook no disponible después de 30s, continuando de todos modos...")
-
-    # ===== CREAR Y EJECUTAR EL BOT =====
+    # ============================================================
+    # 3. CREAR Y EJECUTAR EL BOT
+    # ============================================================
     try:
         bot = Bot()
         bot_instance = bot
-        set_bot_instance(bot)  # Registrar en el dashboard (y webhook)
-        log_service.add_log('info', 'Bot creado y registrado en el dashboard', 'main')
+        set_bot_instance(bot)       # Dashboard
+        set_webhook_bot(bot)        # Webhook
+        log_service.add_log('info', 'Bot creado y registrado', 'main')
 
         logger.info("=" * 60)
         logger.info("🔮 Conectando al canal de Twitch...")
@@ -135,7 +135,7 @@ def main():
         log_service.add_log('info', 'Bot detenido por el usuario', 'main')
     except Exception as e:
         logger.error(f"❌ Error fatal: {e}")
-        log_service.add_log('critical', f'Error fatal al iniciar el bot: {e}', 'main')
+        log_service.add_log('critical', f'Error fatal: {e}', 'main')
         sys.exit(1)
     finally:
         try:

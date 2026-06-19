@@ -291,7 +291,7 @@ class EventSubService:
                 self._handlers[event.type] = self._on_generic_event
 
     # ============================================================
-    # ESPERA DEL WEBHOOK (nueva ruta /twitch/webhook)
+    # ESPERA DEL WEBHOOK
     # ============================================================
 
     def wait_for_webhook(self, timeout: int = 60, check_interval: int = 2):
