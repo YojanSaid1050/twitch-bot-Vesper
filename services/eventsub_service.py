@@ -1,12 +1,11 @@
 # services/eventsub_service.py
 """
 Servicio EventSub profesional para Twitch Helix API (2026)
-- Todas las suscripciones se crean con App Access Token
+- Las suscripciones se crean con el token apropiado según el evento
 - Verifica scopes del broadcaster antes de suscribir
 - Espera a que el webhook esté activo
 - Dispatcher central con handlers específicos
 - Deduplicación y validación de eventos
-- El webhook ahora está en /twitch/webhook (servicio independiente)
 """
 
 import os
@@ -51,6 +50,11 @@ class EventDefinition:
     requires_moderator: bool = False
     requires_user: bool = False
     handler: Optional[str] = None
+    # NUEVO: qué token usar para crear la suscripción
+    # 'app' = App Access Token (default)
+    # 'broadcaster' = Token del broadcaster
+    # 'bot' = Token del bot
+    auth_token_type: str = 'app'
 
     def __post_init__(self):
         if self.handler is None:
@@ -69,12 +73,12 @@ def _build_condition(broadcaster_id: str, moderator_id: str = None, user_id: str
 
 # Lista completa de eventos según documentación oficial 2026
 EVENTS = [
-    # ===== Stream =====
+    # ===== Stream (usando App Token) =====
     EventDefinition("stream.online", "1", lambda b, m, u: {"broadcaster_user_id": b}),
     EventDefinition("stream.offline", "1", lambda b, m, u: {"broadcaster_user_id": b}),
     EventDefinition("channel.update", "2", lambda b, m, u: {"broadcaster_user_id": b}),
 
-    # ===== Suscripciones =====
+    # ===== Suscripciones (usando App Token) =====
     EventDefinition("channel.subscribe", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:subscriptions"]),
     EventDefinition("channel.subscription.end", "1", lambda b, m, u: {"broadcaster_user_id": b},
@@ -84,20 +88,20 @@ EVENTS = [
     EventDefinition("channel.subscription.message", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:subscriptions"]),
 
-    # ===== Cheers =====
+    # ===== Cheers (usando App Token) =====
     EventDefinition("channel.cheer", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["bits:read"]),
 
-    # ===== Raid =====
+    # ===== Raid (usando App Token) =====
     EventDefinition("channel.raid", "1", lambda b, m, u: {"to_broadcaster_user_id": b}),
 
-    # ===== VIP =====
+    # ===== VIP (usando App Token) =====
     EventDefinition("channel.vip.add", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:vips"]),
     EventDefinition("channel.vip.remove", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:vips"]),
 
-    # ===== Predicciones =====
+    # ===== Predicciones (usando App Token) =====
     EventDefinition("channel.prediction.begin", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:predictions"]),
     EventDefinition("channel.prediction.progress", "1", lambda b, m, u: {"broadcaster_user_id": b},
@@ -107,7 +111,7 @@ EVENTS = [
     EventDefinition("channel.prediction.end", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:predictions"]),
 
-    # ===== Encuestas =====
+    # ===== Encuestas (usando App Token) =====
     EventDefinition("channel.poll.begin", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:polls"]),
     EventDefinition("channel.poll.progress", "1", lambda b, m, u: {"broadcaster_user_id": b},
@@ -115,7 +119,7 @@ EVENTS = [
     EventDefinition("channel.poll.end", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:polls"]),
 
-    # ===== Metas =====
+    # ===== Metas (usando App Token) =====
     EventDefinition("channel.goal.begin", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:goals"]),
     EventDefinition("channel.goal.progress", "1", lambda b, m, u: {"broadcaster_user_id": b},
@@ -123,7 +127,7 @@ EVENTS = [
     EventDefinition("channel.goal.end", "1", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:goals"]),
 
-    # ===== Hype Train =====
+    # ===== Hype Train (usando App Token) =====
     EventDefinition("channel.hype_train.begin", "2", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:hype_train"]),
     EventDefinition("channel.hype_train.progress", "2", lambda b, m, u: {"broadcaster_user_id": b},
@@ -131,7 +135,7 @@ EVENTS = [
     EventDefinition("channel.hype_train.end", "2", lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:hype_train"]),
 
-    # ===== Redenciones =====
+    # ===== Redenciones (usando App Token) =====
     EventDefinition("channel.channel_points_custom_reward_redemption.add", "1",
                     lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:redemptions"]),
@@ -139,95 +143,113 @@ EVENTS = [
                     lambda b, m, u: {"broadcaster_user_id": b},
                     required_scopes=["channel:read:redemptions"]),
 
-    # ===== EVENTOS CON MODERATOR_USER_ID =====
-    # Estos requieren que el moderador (broadcaster) tenga los scopes específicos
+    # ===== EVENTOS CON MODERATOR_USER_ID (usando BROADCASTER TOKEN) =====
+    # Estos requieren que el token del broadcaster tenga los scopes específicos
     EventDefinition("channel.follow", "2",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:read:followers"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
 
     EventDefinition("channel.moderator.add", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["channel:manage:moderators"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
     EventDefinition("channel.moderator.remove", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["channel:manage:moderators"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
 
     # Chat (requieren user_id = broadcaster_id)
     EventDefinition("channel.chat.message_delete", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m, user_id=b),
                     required_scopes=["moderator:manage:chat_messages"],
-                    requires_moderator=True, requires_user=True),
+                    requires_moderator=True, requires_user=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
     EventDefinition("channel.chat.clear", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m, user_id=b),
                     required_scopes=["moderator:manage:chat_messages"],
-                    requires_moderator=True, requires_user=True),
+                    requires_moderator=True, requires_user=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
     EventDefinition("channel.chat.clear_user_messages", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m, user_id=b),
                     required_scopes=["moderator:manage:chat_messages"],
-                    requires_moderator=True, requires_user=True),
+                    requires_moderator=True, requires_user=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
 
     # Shoutout
     EventDefinition("channel.shoutout.create", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:shoutouts"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
     EventDefinition("channel.shoutout.receive", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:shoutouts"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
 
-    # Ban / Unban
+    # Ban / Unban - CRÍTICO: usar BROADCASTER TOKEN
     EventDefinition("channel.ban", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:banned_users"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- USAR BROADCASTER TOKEN
     EventDefinition("channel.unban", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:banned_users"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- USAR BROADCASTER TOKEN
 
     # Shield Mode
     EventDefinition("channel.shield_mode.begin", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:shield_mode"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
     EventDefinition("channel.shield_mode.end", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:shield_mode"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
 
     # Unban Requests
     EventDefinition("channel.unban_request.create", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:unban_requests"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
     EventDefinition("channel.unban_request.resolve", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:unban_requests"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
 
     # Usuarios Sospechosos
     EventDefinition("channel.suspicious_user.message", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:read:suspicious_users"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
     EventDefinition("channel.suspicious_user.update", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:read:suspicious_users"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
 
     # Automod
     EventDefinition("automod.message.hold", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:automod"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
     EventDefinition("automod.message.update", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:automod"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    auth_token_type='broadcaster'),  # <-- Usar token del broadcaster
 ]
 
 
@@ -291,7 +313,7 @@ class EventSubService:
                 self._handlers[event.type] = self._on_generic_event
 
     # ============================================================
-    # ESPERA DEL WEBHOOK (nueva ruta /twitch/webhook)
+    # ESPERA DEL WEBHOOK
     # ============================================================
 
     def wait_for_webhook(self, timeout: int = 60, check_interval: int = 2):
@@ -304,13 +326,11 @@ class EventSubService:
             logger.error("❌ EVENTSUB_CALLBACK_URL no configurado")
             return False
 
-        # NUEVA RUTA: /twitch/webhook
         webhook_url = f"{callback_url}/twitch/webhook"
         logger.info(f"⏳ Esperando que el webhook esté activo: {webhook_url}")
 
         start_time = time.time()
         while time.time() - start_time < timeout:
-            # Intentar primero con la URL pública
             try:
                 resp = requests.get(webhook_url, timeout=5)
                 if resp.status_code == 200:
@@ -350,11 +370,11 @@ class EventSubService:
         if self._broadcaster_scopes and (now - self._scopes_cache_time) < self._scopes_cache_ttl:
             return self._broadcaster_scopes
 
-        try:
-            token = settings.BROADCASTER_TOKEN
-            if not token:
-                return []
+        token = settings.BROADCASTER_TOKEN
+        if not token:
+            return []
 
+        try:
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Client-Id": settings.CLIENT_ID
@@ -415,7 +435,7 @@ class EventSubService:
             return False
 
     # ============================================================
-    # PROCESADOR DE WEBHOOK (punto de entrada desde webhook.py)
+    # PROCESADOR DE WEBHOOK
     # ============================================================
 
     def process_webhook(self, message_id: str, event_type: str, event_data: Dict):
@@ -428,9 +448,7 @@ class EventSubService:
         self.stats["events_processed"] += 1
         logger.info(f"📨 Evento {event_type} recibido (ID: {message_id})")
 
-        # Buscar handler
         handler = self._handlers.get(event_type, self._on_generic_event)
-        # Ejecutar de forma asíncrona
         if self.bot and self.bot.loop:
             asyncio.run_coroutine_threadsafe(
                 self._safe_handle(handler, event_type, event_data),
@@ -447,11 +465,10 @@ class EventSubService:
             log_service.add_log('error', f'Error en handler de {event_type}: {e}', 'bot')
 
     # ============================================================
-    # HANDLERS GENÉRICOS Y ESPECÍFICOS
+    # HANDLERS
     # ============================================================
 
     async def _on_generic_event(self, data):
-        """Handler por defecto para eventos sin handler específico."""
         log_service.add_log('info', f'📨 Evento no manejado: {data}', 'system')
 
     async def _on_stream_online(self, data):
@@ -549,11 +566,19 @@ class EventSubService:
         log_service.add_log('info', f'📢 Shoutout recibido de {from_user} para {to_user}', 'stats')
 
     # ============================================================
-    # TOKEN - SIEMPRE APP ACCESS TOKEN
+    # OBTENER TOKEN SEGÚN TIPO
     # ============================================================
 
-    def _get_app_token(self) -> str:
-        return getattr(settings, "APP_ACCESS_TOKEN", "")
+    def _get_token_for_auth(self, auth_token_type: str) -> Tuple[Optional[str], str]:
+        """Obtiene el token apropiado según el tipo y el nombre para logs."""
+        if auth_token_type == 'app':
+            return getattr(settings, "APP_ACCESS_TOKEN", ""), "App"
+        elif auth_token_type == 'broadcaster':
+            return settings.BROADCASTER_TOKEN, "Broadcaster"
+        elif auth_token_type == 'bot':
+            return settings.BOT_TOKEN, "Bot"
+        else:
+            return getattr(settings, "APP_ACCESS_TOKEN", ""), "App"
 
     # ============================================================
     # GESTIÓN DE SUSCRIPCIONES
@@ -607,8 +632,10 @@ class EventSubService:
             logger.error(f"Error obteniendo suscripciones: {e}")
             return set()
 
-    def _ensure_subscription(self, headers, event_def: EventDefinition, existing: Set, moderator_id: str):
-        """Crea una suscripción si no existe y los scopes son suficientes."""
+    def _ensure_subscription(self, event_def: EventDefinition, existing: Set, moderator_id: str):
+        """
+        Crea una suscripción usando el token apropiado según el tipo de evento.
+        """
         condition = event_def.condition_builder(
             settings.BROADCASTER_ID,
             moderator_id if event_def.requires_moderator else None,
@@ -619,21 +646,31 @@ class EventSubService:
 
         if key in existing:
             self.stats["subscriptions_skipped"] += 1
-            # ✅ Log de evento ya existente (skipped)
             logger.info(f"⏭️ {event_def.type} ya existe, omitiendo")
             return True
 
-        # Verificar scopes antes de crear
+        # Verificar scopes del broadcaster
         if event_def.required_scopes:
             if not self._has_required_scopes(event_def.required_scopes):
                 self.stats["subscriptions_failed_scopes"] += 1
-                # ✅ Log de evento omitido por scopes faltantes
                 logger.warning(f"⚠️ Omitiendo {event_def.type}: Scopes faltantes: {', '.join(event_def.required_scopes)}")
                 log_service.add_log('warning', f'Omitiendo {event_def.type}: Scopes faltantes', 'bot')
                 return False
 
+        # Obtener el token apropiado para esta suscripción
+        token, token_name = self._get_token_for_auth(event_def.auth_token_type)
+        if not token:
+            logger.error(f"❌ No hay token {token_name} disponible para {event_def.type}")
+            log_service.add_log('error', f'No hay token {token_name} para {event_def.type}', 'bot')
+            return False
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Client-Id": settings.CLIENT_ID,
+            "Content-Type": "application/json"
+        }
+
         try:
-            # NUEVA RUTA: /twitch/webhook
             callback_url = f"{settings.EVENTSUB_CALLBACK_URL}/twitch/webhook"
 
             payload = {
@@ -647,8 +684,7 @@ class EventSubService:
                 }
             }
 
-            # ✅ Log de intento de suscripción
-            logger.info(f"📡 Intentando suscribir: {event_def.type} (v{event_def.version})")
+            logger.info(f"📡 Intentando suscribir: {event_def.type} (v{event_def.version}) usando token {token_name}")
 
             r = self.session.post(
                 "https://api.twitch.tv/helix/eventsub/subscriptions",
@@ -660,15 +696,13 @@ class EventSubService:
             if r.status_code == 202:
                 self.stats["subscriptions_created"] += 1
                 existing.add(key)
-                # ✅ Log de éxito
-                logger.info(f"✅ Suscrito a {event_def.type} (v{event_def.version})")
-                log_service.add_log('info', f'Suscrito a {event_def.type}', 'bot')
+                logger.info(f"✅ Suscrito a {event_def.type} (v{event_def.version}) usando token {token_name}")
+                log_service.add_log('info', f'Suscrito a {event_def.type} usando token {token_name}', 'bot')
                 return True
 
             if r.status_code == 409:
                 existing.add(key)
                 self.stats["subscriptions_skipped"] += 1
-                # ✅ Log de conflicto (ya existe)
                 logger.info(f"⏭️ {event_def.type} ya existe (409), omitiendo")
                 return True
 
@@ -682,12 +716,10 @@ class EventSubService:
                     pass
 
                 if r.status_code == 403:
-                    # ✅ Log de error 403 (scopes insuficientes)
-                    logger.warning(f"⚠️ {event_def.type}: 403 - {error_detail} (scopes insuficientes)")
-                    log_service.add_log('warning', f'{event_def.type}: 403 - Scopes insuficientes', 'bot')
+                    logger.warning(f"⚠️ {event_def.type}: 403 - {error_detail} (token {token_name} sin permisos suficientes)")
+                    log_service.add_log('warning', f'{event_def.type}: 403 - Token {token_name} sin permisos', 'bot')
                     self.stats["subscriptions_failed_scopes"] += 1
                 else:
-                    # ✅ Log de otros errores 4xx
                     logger.error(f"❌ Error en {event_def.type}: {r.status_code} - {error_detail}")
                     log_service.add_log('error', f'Error suscribiendo a {event_def.type}: {r.status_code}', 'bot')
                     self.stats["subscription_errors"] += 1
@@ -695,19 +727,16 @@ class EventSubService:
 
             # Errores que pueden reintentarse (429, 5xx)
             if r.status_code in (429, 500, 502, 503, 504):
-                # ✅ Log de error temporal
                 logger.warning(f"⚠️ {event_def.type}: {r.status_code} - reintentando más tarde")
                 return False
 
             self.stats["subscription_errors"] += 1
-            # ✅ Log de error desconocido
             logger.error(f"❌ Error en {event_def.type}: {r.status_code} - {r.text}")
             log_service.add_log('error', f'Error suscribiendo a {event_def.type}: {r.status_code}', 'bot')
             return False
 
         except Exception as e:
             self.stats["subscription_errors"] += 1
-            # ✅ Log de excepción
             logger.error(f"❌ Excepción en {event_def.type}: {e}", exc_info=True)
             log_service.add_log('error', f'Excepción suscribiendo a {event_def.type}: {e}', 'bot')
             return False
@@ -718,37 +747,37 @@ class EventSubService:
         if not self.wait_for_webhook(timeout=60):
             logger.warning("⚠️ Webhook no disponible, pero continuando con suscripciones...")
 
-        app_token = self._get_app_token()
+        app_token = self._get_token_for_auth('app')[0]
         if not app_token:
             logger.error("❌ No hay APP_ACCESS_TOKEN configurado")
             log_service.add_log('error', 'No hay APP_ACCESS_TOKEN para EventSub', 'bot')
             return
 
-        headers = {
+        app_headers = {
             "Authorization": f"Bearer {app_token}",
             "Client-Id": settings.CLIENT_ID,
             "Content-Type": "application/json"
         }
 
         # Limpiar suscripciones inválidas
-        self._cleanup_invalid_subscriptions(headers)
+        self._cleanup_invalid_subscriptions(app_headers)
 
-        # Obtener suscripciones existentes
-        existing = self._get_existing_subscriptions(headers)
+        # Obtener suscripciones existentes (usando App Token para listar todas)
+        existing = self._get_existing_subscriptions(app_headers)
 
         # IDs necesarios
         broadcaster_id = settings.BROADCASTER_ID
         moderator_id = getattr(settings, "MODERATOR_USER_ID", broadcaster_id)
 
-        logger.info(f"📡 Suscribiendo {len(EVENTS)} eventos con App Token")
-        log_service.add_log('info', f'Suscribiendo {len(EVENTS)} eventos con App Token', 'bot')
+        logger.info(f"📡 Suscribiendo {len(EVENTS)} eventos con tokens según su tipo")
+        log_service.add_log('info', f'Suscribiendo {len(EVENTS)} eventos', 'bot')
 
         successful = 0
         failed = 0
         skipped = 0
 
         for event_def in EVENTS:
-            result = self._ensure_subscription(headers, event_def, existing, moderator_id)
+            result = self._ensure_subscription(event_def, existing, moderator_id)
             if result:
                 successful += 1
             else:
