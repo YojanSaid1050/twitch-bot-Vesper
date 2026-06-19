@@ -1,6 +1,6 @@
 """
 Servicio para manejar EventSub de Twitch
-Ahora con todas las suscripciones necesarias para logs completos.
+Suscripciones a todos los eventos relevantes usando App Access Token (según documentación oficial)
 """
 
 import asyncio
@@ -28,7 +28,10 @@ class EventSubService:
         log_service.add_log('info', 'EventSub service vinculado al bot', 'bot')
 
     def _process_event(self, event_type: str, event_data: Dict):
-        """Procesa eventos entrantes y los registra en los logs."""
+        """
+        Procesa eventos entrantes y los registra en los logs.
+        Los eventos se clasifican por fuente: 'moderation', 'stats' o 'system'.
+        """
         async def send_notification():
             try:
                 if not self.channel:
@@ -62,7 +65,7 @@ class EventSubService:
                 elif event_type == "channel.follow":
                     user = event_data.get("user_name", "Desconocido")
                     log_service.add_log('info', f'⭐ Nuevo seguidor: {user}', 'stats')
-                    # Enviar notificación al chat si se desea
+                    # Opcional: notificación en chat
                     # await self.channel.send(f"🕯️ Una nueva alma se une al ritual... ¡Bienvenido, {user}!")
 
                 # ========== EVENTOS DE SUSCRIPCIONES ==========
@@ -72,6 +75,7 @@ class EventSubService:
                     is_gift = event_data.get("is_gift", False)
                     if not is_gift:
                         log_service.add_log('info', f'🎉 Nueva suscripción de {user} (Tier {tier})', 'stats')
+                        # Notificar al sistema de notificaciones
                         await notification_service.on_subscribe(self.channel, user, tier, "sub")
                     else:
                         log_service.add_log('info', f'🎁 Suscripción regalada a {user} (Tier {tier})', 'stats')
@@ -81,7 +85,7 @@ class EventSubService:
                     total = event_data.get("total", 1)
                     tier = event_data.get("tier", "1000")
                     log_service.add_log('info', f'🎁 {user} regaló {total} suscripción(es) Tier {tier}', 'stats')
-                    # Notificación en chat
+                    # Notificación en chat (opcional)
                     # await self.channel.send(f"🎁 {user} ha ofrendado {total} suscripción(es) Tier {tier}! El altar se ilumina.")
 
                 elif event_type == "channel.subscription.message":
@@ -104,7 +108,7 @@ class EventSubService:
                     bits = event_data.get("bits", 0)
                     message = event_data.get("message", "")
                     log_service.add_log('info', f'💎 {user} envió {bits} bits - Mensaje: "{message[:30]}"', 'stats')
-                    # Notificación en chat
+                    # Notificación en chat (opcional)
                     # await self.channel.send(f"💎 {user} ha derramado {bits} bits sobre el altar!")
 
                 # ========== EVENTOS DE STREAM (online/offline) ==========
@@ -113,7 +117,7 @@ class EventSubService:
                     game = event_data.get("game_name", "No especificado")
                     title = event_data.get("title", "Sin título")
                     log_service.add_log('info', f'📡 Stream EN VIVO: {streamer} está jugando {game} - "{title}"', 'system')
-                    # Notificación en chat
+                    # Notificación en chat (opcional)
                     # await self.channel.send(f"📡 El ritual ha comenzado! {streamer} está jugando {game}.")
 
                 elif event_type == "stream.offline":
@@ -170,7 +174,11 @@ class EventSubService:
             asyncio.run_coroutine_threadsafe(send_notification(), self.bot.loop)
 
     def subscribe_to_events(self):
-        """Suscribirse a todos los eventos relevantes vía EventSub."""
+        """
+        Suscribirse a todos los eventos relevantes usando App Access Token.
+        Según documentación oficial de Twitch, las suscripciones por webhook
+        requieren App Access Token (no User Access Token).
+        """
         app_token = getattr(settings, 'APP_ACCESS_TOKEN', '')
         if not app_token:
             logger.error("❌ No hay APP_ACCESS_TOKEN configurado")
@@ -189,16 +197,19 @@ class EventSubService:
             "Content-Type": "application/json"
         }
 
-        # Lista completa de eventos que queremos suscribir
+        # Lista completa de eventos a suscribir
         events = [
-            # Moderación
+            # Moderación (requieren scopes en el token del usuario, pero la suscripción es con App Token)
             ("channel.ban", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
             ("channel.unban", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
             ("channel.timeout", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
             ("channel.untimeout", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
 
-            # Seguidores
-            ("channel.follow", "2", {"broadcaster_user_id": settings.BROADCASTER_ID, "moderator_user_id": settings.BOT_ID}),
+            # Seguidores (requiere moderator_user_id para v2)
+            ("channel.follow", "2", {
+                "broadcaster_user_id": settings.BROADCASTER_ID,
+                "moderator_user_id": settings.BOT_ID  # El bot es moderador
+            }),
 
             # Suscripciones
             ("channel.subscribe", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
@@ -227,7 +238,7 @@ class EventSubService:
             ("channel.hype_train.begin", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
             ("channel.hype_train.end", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
 
-            # Puntos de canal (redenciones)
+            # Redenciones de puntos de canal
             ("channel.channel_points_custom_reward_redemption.add", "1", {"broadcaster_user_id": settings.BROADCASTER_ID}),
         ]
 
@@ -265,7 +276,7 @@ class EventSubService:
                 logger.error(f"Error en {event_type}: {e}")
                 log_service.add_log('error', f'Error en {event_type}: {e}', 'bot')
 
-        # El polling de follows se mantiene como respaldo (o se puede desactivar si se usa EventSub)
+        # Iniciar polling de follows como respaldo (por si EventSub falla)
         if self.bot and self.bot.loop:
             asyncio.run_coroutine_threadsafe(
                 self._start_follow_polling(),
@@ -273,9 +284,10 @@ class EventSubService:
             )
 
     async def _start_follow_polling(self):
-        # Iniciar polling de follows (respaldo o si no se usa EventSub para follows)
+        """Inicia el polling de follows como respaldo."""
         notification_service.start_follow_polling()
 
     def stop(self):
+        """Detiene el servicio (no hay servidor webhook que detener)."""
         logger.info("🛑 EventSub detenido")
         log_service.add_log('info', 'EventSub detenido', 'bot')
