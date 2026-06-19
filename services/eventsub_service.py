@@ -291,3 +291,5 @@ class EventSubService:
         """Detiene el servicio (no hay servidor webhook que detener)."""
         logger.info("🛑 EventSub detenido")
         log_service.add_log('info', 'EventSub detenido', 'bot')
+
+eventsub_service = EventSubService()
