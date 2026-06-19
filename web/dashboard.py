@@ -1,25 +1,21 @@
+# web/dashboard.py
 """
 Dashboard de configuración para el bot de Twitch
-Incluye el servidor webhook para EventSub
-Se ejecuta en el mismo proceso que el bot
+Se ejecuta en un proceso/hilo separado del webhook
 """
 
 import os
 import sys
 import asyncio
 import time
-import hmac
-import hashlib
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
-from collections import deque
+from datetime import datetime, timedelta
 
 from flask import (
     Flask, render_template, request, jsonify, session,
-    redirect, url_for, Response, abort
+    redirect, url_for
 )
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from werkzeug.exceptions import BadRequest, Unauthorized, UnsupportedMediaType
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -47,16 +43,6 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 login_manager.login_message = 'Por favor inicia sesión'
 
-# ============================================
-# CONSTANTES DE SEGURIDAD PARA WEBHOOK
-# ============================================
-MAX_MESSAGE_AGE_SECONDS = 600  # 10 minutos
-CACHE_SIZE = 1000
-TWITCH_SECRET = os.getenv("TWITCH_WEBHOOK_SECRET", "")
-
-if not TWITCH_SECRET:
-    logger.warning("⚠️ TWITCH_WEBHOOK_SECRET no configurado. Las solicitudes serán rechazadas.")
-
 
 class User(UserMixin):
     def __init__(self, id):
@@ -82,11 +68,13 @@ _spotify_cache = {
 
 
 def set_bot_instance(bot):
+    """Registra la instancia del bot en el dashboard."""
     global _bot_instance
     _bot_instance = bot
 
 
 def wait_for_tokens(timeout=60):
+    """Espera a que los tokens sean válidos."""
     global _tokens_ready
     logger.info(f"⏳ Esperando hasta {timeout}s a que los tokens sean válidos...")
     start = time.time()
@@ -105,6 +93,7 @@ def wait_for_tokens(timeout=60):
 
 
 def get_cached_spotify_data(force_refresh=False):
+    """Obtiene datos de Spotify con caché."""
     global _spotify_cache
     now = time.time()
     if not force_refresh and _spotify_cache['data'] is not None:
@@ -166,62 +155,6 @@ def call_twitch_api_async(coro, *args, **kwargs):
         except Exception as e:
             logger.error(f"Error en loop temporal: {e}", exc_info=True)
             return None
-
-
-# ============================================
-# FUNCIONES DE VALIDACIÓN PARA WEBHOOK
-# ============================================
-
-class MessageIdCache:
-    """Cache para deduplicación de IDs de mensajes (O(1) consulta, deque para expulsión)."""
-    def __init__(self, maxlen: int = CACHE_SIZE):
-        self._maxlen = maxlen
-        self._deque = deque(maxlen=maxlen)
-        self._set = set()
-
-    def add(self, message_id: str) -> bool:
-        if message_id in self._set:
-            return False
-        if len(self._deque) == self._maxlen:
-            oldest = self._deque[0]
-            self._set.discard(oldest)
-        self._deque.append(message_id)
-        self._set.add(message_id)
-        return True
-
-
-_message_cache = MessageIdCache()
-
-
-def verify_signature(message: str, signature: str, secret: str) -> bool:
-    if not secret:
-        logger.warning("⚠️ TWITCH_WEBHOOK_SECRET vacío, omitiendo verificación")
-        return True
-    expected = hmac.new(
-        secret.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
-    if signature.startswith('sha256='):
-        signature = signature[7:]
-    return hmac.compare_digest(expected, signature)
-
-
-def is_timestamp_fresh(timestamp_str: str) -> bool:
-    try:
-        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-        now = datetime.now(timezone.utc)
-        age = (now - dt).total_seconds()
-        if age < 0:
-            logger.warning(f"Timestamp futuro: {timestamp_str}")
-            return False
-        if age > MAX_MESSAGE_AGE_SECONDS:
-            logger.warning(f"Mensaje demasiado antiguo: {age:.0f}s")
-            return False
-        return True
-    except ValueError as e:
-        logger.error(f"Error parseando timestamp: {e}")
-        return False
 
 
 # ============================================
@@ -624,114 +557,22 @@ def api_dashboard_data():
 
 
 # ============================================
-# WEBHOOK DE TWITCH (EVENTSUB)
-# ============================================
-
-@app.route('/webhook/twitch', methods=['POST'])
-def twitch_webhook():
-    """Endpoint principal para webhooks de Twitch (EventSub)."""
-    start_time = time.time()
-
-    # Validar Content-Type
-    if request.content_type != 'application/json':
-        abort(415, description="Content-Type debe ser application/json")
-
-    # Obtener headers
-    signature = request.headers.get('Twitch-Eventsub-Message-Signature', '')
-    message_id = request.headers.get('Twitch-Eventsub-Message-Id', '')
-    timestamp = request.headers.get('Twitch-Eventsub-Message-Timestamp', '')
-    message_type = request.headers.get('Twitch-Eventsub-Message-Type', '')
-
-    if not message_id or not timestamp or not signature:
-        logger.warning("Faltan headers de EventSub")
-        abort(400, description="Faltan headers requeridos")
-
-    raw_body = request.get_data(as_text=True)
-
-    # Validar timestamp (replay attack)
-    if not is_timestamp_fresh(timestamp):
-        logger.warning(f"Mensaje rechazado por timestamp inválido: {timestamp}")
-        abort(400, description="Timestamp inválido o expirado")
-
-    # Construir mensaje para firma
-    verification_message = message_id + timestamp + raw_body
-
-    # Verificar firma
-    if not verify_signature(verification_message, signature, TWITCH_SECRET):
-        logger.warning(f"Firma inválida para mensaje {message_id}")
-        abort(401, description="Firma HMAC inválida")
-
-    # Deduplicación
-    if not _message_cache.add(message_id):
-        logger.info(f"⏩ Mensaje duplicado ignorado: {message_id}")
-        return jsonify({"status": "duplicate"}), 200
-
-    # Parsear JSON
-    try:
-        data = request.json
-    except Exception as e:
-        logger.error(f"Error parseando JSON: {e}")
-        abort(400, description="JSON inválido")
-
-    # Manejar según tipo de mensaje
-    if message_type == 'webhook_callback_verification':
-        challenge = data.get('challenge')
-        if not challenge:
-            abort(400, description="Falta challenge en verificación")
-        logger.info(f"✅ Verificando webhook con challenge: {challenge[:20]}...")
-        return Response(challenge, status=200, mimetype='text/plain')
-
-    elif message_type == 'notification':
-        event_type = data.get('subscription', {}).get('type', 'unknown')
-        event_data = data.get('event', {})
-        logger.info(f"📨 Evento {event_type} recibido (ID: {message_id})")
-
-        # Procesar evento directamente (el bot está en el mismo proceso)
-        if _bot_instance:
-            eventsub_service.set_bot(_bot_instance)
-            eventsub_service.process_webhook(message_id, event_type, event_data)
-        else:
-            logger.warning("Bot no disponible para procesar evento")
-            log_service.add_log('info', f'Evento recibido sin bot: {event_type}', 'webhook')
-
-        return jsonify({"status": "ok"}), 200
-
-    elif message_type == 'revocation':
-        subscription = data.get('subscription', {})
-        event_type = subscription.get('type', 'unknown')
-        reason = data.get('reason', 'No especificado')
-        logger.warning(f"🔄 Revocación de suscripción: {event_type} - Motivo: {reason}")
-        log_service.add_log('warning', f'Revocación de {event_type}: {reason}', 'webhook')
-        return jsonify({"status": "revoked"}), 200
-
-    else:
-        logger.warning(f"Tipo de mensaje desconocido: {message_type}")
-        abort(400, description="Tipo de mensaje no soportado")
-
-
-@app.route('/webhook/twitch', methods=['GET'])
-def twitch_webhook_get():
-    """Método GET para verificación inicial."""
-    return jsonify({"status": "ready"}), 200
-
-
-# ============================================
 # ERROR HANDLERS
 # ============================================
 
 @app.errorhandler(400)
 def bad_request(e):
-    return jsonify({"error": "Bad Request", "description": str(e.description)}), 400
+    return jsonify({"error": "Bad Request"}), 400
 
 
 @app.errorhandler(401)
 def unauthorized(e):
-    return jsonify({"error": "Unauthorized", "description": str(e.description)}), 401
+    return jsonify({"error": "Unauthorized"}), 401
 
 
-@app.errorhandler(415)
-def unsupported_media(e):
-    return jsonify({"error": "Unsupported Media Type", "description": str(e.description)}), 415
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Not Found"}), 404
 
 
 @app.errorhandler(500)
@@ -741,50 +582,7 @@ def internal_error(e):
 
 
 # ============================================
-# ENDPOINTS ADICIONALES
-# ============================================
-
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check completo."""
-    bot_status = "unknown"
-    try:
-        if _bot_instance:
-            bot_status = "connected"
-        else:
-            bot_status = "not_initialized"
-    except:
-        bot_status = "error"
-
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version": "2.0",
-        "bot_status": bot_status,
-        "twitch_secret_configured": bool(TWITCH_SECRET),
-        "cache_size": len(_message_cache._set),
-        "uptime_seconds": int((datetime.now() - app.config.get('START_TIME', datetime.now())).total_seconds())
-    }), 200
-
-
-@app.route('/', methods=['GET'])
-def index_root():
-    """Raíz del servicio (no el dashboard autenticado)."""
-    return jsonify({
-        "service": "VesperBot Dashboard + EventSub",
-        "status": "running",
-        "version": "2.0",
-        "endpoints": {
-            "webhook": "/webhook/twitch",
-            "health": "/health",
-            "dashboard": "/"
-        },
-        "documentation": "https://dev.twitch.tv/docs/eventsub"
-    }), 200
-
-
-# ============================================
-# ENDPOINTS DE WARNINGS (continuación)
+# ENDPOINTS DE WARNINGS
 # ============================================
 
 @app.route('/api/warnings/<user_id>', methods=['DELETE'])
@@ -906,7 +704,7 @@ def api_clear_link_warnings(user_id):
 
 
 # ============================================
-# ENDPOINTS DE SPOTIFY (continuación)
+# ENDPOINTS DE SPOTIFY
 # ============================================
 
 @app.route('/api/spotify/queue')
@@ -1088,7 +886,7 @@ def api_spotify_clear_queue():
 
 
 # ============================================
-# ENDPOINTS DE LOGS (MODIFICADOS)
+# ENDPOINTS DE LOGS
 # ============================================
 
 @app.route('/api/logs')
@@ -1803,20 +1601,19 @@ def api_twitch_check_user(user_id):
 
 
 # ============================================
-# HEALTH CHECK (adicional, ya existe uno arriba)
-# ============================================
-# La ruta /health ya está definida arriba con más detalle.
-# Esta versión es redundante, la mantenemos por compatibilidad.
-# Se puede eliminar si no es necesaria, pero no afecta.
-
-# ============================================
 # RUN DASHBOARD
 # ============================================
 
 def run_dashboard(port=None):
+    """
+    Inicia el servidor del dashboard.
+    
+    Args:
+        port: Puerto donde escuchar (por defecto 5002, pero se puede pasar)
+    """
     if port is None:
-        port = int(os.getenv("PORT", "10000"))  # Render usa PORT, por defecto 10000
+        port = int(os.getenv("DASHBOARD_PORT", "5002"))
     wait_for_tokens(timeout=60)
     app.config['START_TIME'] = datetime.now()
-    logger.info(f"🚀 Iniciando servidor dashboard + webhook en el puerto {port}")
+    logger.info(f"🚀 Iniciando servidor dashboard en el puerto {port}")
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)

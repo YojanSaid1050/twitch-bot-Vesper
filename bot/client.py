@@ -1,3 +1,4 @@
+# bot/client.py
 """
 Cliente principal del bot
 """
@@ -43,8 +44,8 @@ class Bot(commands.Bot):
         from commands import register_commands
         register_commands(self)
 
-        # Inicializar EventSub (sin servidor webhook)
-        self._init_eventsub()
+        # Inicializar servicios de EventSub y notificaciones (sin suscribir aún)
+        self._init_eventsub_services()
 
         # Cargar comandos personalizados iniciales
         self._load_custom_commands()
@@ -130,27 +131,48 @@ class Bot(commands.Bot):
             logger.error(f"Error aplicando settings de chat: {e}")
             log_service.add_log('error', f'Error aplicando settings de chat: {e}', 'bot')
 
-    def _init_eventsub(self):
+    def _init_eventsub_services(self):
+        """
+        Inicializa los servicios de EventSub y notificaciones,
+        pero NO suscribe eventos aún (se hará en event_ready).
+        """
         try:
             from services.eventsub_service import eventsub_service
             from services.notification_service import notification_service
 
+            # Vincular el bot a los servicios
             eventsub_service.set_bot(self)
             notification_service.set_bot(self)
 
+            logger.info("🔗 Servicios de EventSub vinculados al bot")
+            log_service.add_log('info', 'Servicios de EventSub vinculados al bot', 'bot')
+        except ImportError as e:
+            logger.warning(f"⚠️ Error cargando servicios de EventSub: {e}")
+            log_service.add_log('warning', f'Error cargando servicios de EventSub: {e}', 'bot')
+        except Exception as e:
+            logger.error(f"❌ Error inicializando servicios de EventSub: {e}")
+            log_service.add_log('error', f'Error inicializando servicios de EventSub: {e}', 'bot')
+
+    async def _subscribe_eventsub(self):
+        """
+        Suscribe a los eventos de EventSub.
+        Se llama después de que el bot esté conectado y el webhook esté activo.
+        """
+        try:
+            from services.eventsub_service import eventsub_service
+
             if settings.EVENTSUB_CALLBACK_URL and settings.TWITCH_WEBHOOK_SECRET:
+                logger.info("📡 Iniciando suscripción a EventSub...")
+                log_service.add_log('info', 'Iniciando suscripción a EventSub', 'bot')
                 eventsub_service.subscribe_to_events()
-                logger.info("✅ EventSub configurado")
+                logger.info("✅ EventSub configurado correctamente")
                 log_service.add_log('info', 'EventSub configurado correctamente', 'bot')
             else:
-                logger.warning("⚠️ EventSub no configurado")
+                logger.warning("⚠️ EventSub no configurado (faltan URL o secret)")
                 log_service.add_log('warning', 'EventSub no configurado (faltan URL o secret)', 'bot')
-        except ImportError as e:
-            logger.warning(f"⚠️ Error cargando EventSub: {e}")
-            log_service.add_log('warning', f'Error cargando EventSub: {e}', 'bot')
         except Exception as e:
-            logger.error(f"❌ Error inicializando EventSub: {e}")
-            log_service.add_log('error', f'Error inicializando EventSub: {e}', 'bot')
+            logger.error(f"❌ Error en suscripción EventSub: {e}")
+            log_service.add_log('error', f'Error en suscripción EventSub: {e}', 'bot')
 
     async def start_follow_polling(self):
         try:
@@ -171,9 +193,19 @@ class Bot(commands.Bot):
         logger.info("=" * 50)
         logger.info("🔮 CONECTADO AL CANAL")
         logger.info("=" * 50)
+
+        # Ejecutar eventos de preparación
         await self.event_handler.on_ready()
+
+        # Iniciar polling de follows
         await self.start_follow_polling()
+
+        # Aplicar configuraciones del chat
         await self.apply_chat_settings()
+
+        # ===== SUSCRIBIR A EVENTSUB AHORA QUE EL BOT ESTÁ CONECTADO =====
+        await self._subscribe_eventsub()
+
         logger.info("=" * 50)
         logger.info("✅ RELICARIO LISTO PARA SERVIR")
         logger.info("=" * 50)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Twitch Bot - Punto de entrada principal
-Inicia el bot y el dashboard en el mismo proceso
+Inicia el webhook (integrado en el dashboard) y el bot en el mismo proceso
 """
 
 import os
@@ -17,7 +17,7 @@ import signal
 import threading
 import time
 import asyncio
-import requests  # Añadido para verificar webhook
+import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -26,7 +26,6 @@ from web.dashboard import run_dashboard, set_bot_instance, wait_for_tokens
 from utils.logger import setup_logger
 from services.token_manager import token_manager
 from services.log_service import log_service
-from services.eventsub_service import eventsub_service
 from config import settings
 
 logger = setup_logger()
@@ -96,13 +95,14 @@ def main():
     dashboard_thread = threading.Thread(target=start_dashboard, daemon=True)
     dashboard_thread.start()
 
-    # Esperar a que el dashboard esté listo (más robusto)
-    logger.info("⏳ Esperando que el dashboard (webhook) esté listo...")
+    # Esperar a que el webhook esté listo (nueva ruta: /twitch/webhook)
+    logger.info("⏳ Esperando que el webhook esté listo...")
     webhook_ready = False
     port = os.getenv("PORT", "10000")
     for attempt in range(1, 31):  # hasta 30 intentos (30 segundos)
         try:
-            url = f"http://localhost:{port}/webhook/twitch"
+            # Nueva ruta del webhook
+            url = f"http://localhost:{port}/twitch/webhook"
             resp = requests.get(url, timeout=2)
             if resp.status_code == 200:
                 webhook_ready = True
@@ -121,7 +121,7 @@ def main():
     try:
         bot = Bot()
         bot_instance = bot
-        set_bot_instance(bot)
+        set_bot_instance(bot)  # Registrar en el dashboard (y webhook)
         log_service.add_log('info', 'Bot creado y registrado en el dashboard', 'main')
 
         logger.info("=" * 60)

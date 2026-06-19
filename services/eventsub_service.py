@@ -6,7 +6,9 @@ Servicio EventSub profesional para Twitch Helix API (2026)
 - Espera a que el webhook esté activo
 - Dispatcher central con handlers específicos
 - Deduplicación y validación de eventos
+- El webhook ahora está en /twitch/webhook (servicio independiente)
 """
+
 import os
 import asyncio
 import time
@@ -268,9 +270,18 @@ class EventSubService:
         self._handlers = {}
         self._register_handlers()
 
+    def set_bot(self, bot):
+        """Establece la instancia del bot para procesar eventos y obtener el canal."""
+        self.bot = bot
+        if bot and bot.connected_channels:
+            self.channel = bot.connected_channels[0]
+            logger.info(f"📺 Canal establecido: {self.channel.name}")
+            log_service.add_log('info', f'Canal establecido: {self.channel.name}', 'bot')
+        else:
+            logger.info("🤖 Bot registrado en EventSubService")
+
     def _register_handlers(self):
         """Registra los handlers para cada tipo de evento."""
-        # Mapeo automático desde el nombre del método
         for event in EVENTS:
             handler_name = f"_on_{event.handler}"
             if hasattr(self, handler_name):
@@ -280,11 +291,11 @@ class EventSubService:
                 self._handlers[event.type] = self._on_generic_event
 
     # ============================================================
-    # ESPERA DEL WEBHOOK
+    # ESPERA DEL WEBHOOK (nueva ruta /twitch/webhook)
     # ============================================================
 
     def wait_for_webhook(self, timeout: int = 60, check_interval: int = 2):
-        """Espera a que el webhook esté activo."""
+        """Espera a que el webhook esté activo en la ruta /twitch/webhook."""
         if self._webhook_checked and self._webhook_ready:
             return True
 
@@ -293,7 +304,8 @@ class EventSubService:
             logger.error("❌ EVENTSUB_CALLBACK_URL no configurado")
             return False
 
-        webhook_url = f"{callback_url}/webhook/twitch"
+        # NUEVA RUTA: /twitch/webhook
+        webhook_url = f"{callback_url}/twitch/webhook"
         logger.info(f"⏳ Esperando que el webhook esté activo: {webhook_url}")
 
         start_time = time.time()
@@ -312,7 +324,7 @@ class EventSubService:
             # Fallback a localhost (para desarrollo)
             try:
                 port = os.getenv("PORT", "10000")
-                local_url = f"http://localhost:{port}/webhook/twitch"
+                local_url = f"http://localhost:{port}/twitch/webhook"
                 resp = requests.get(local_url, timeout=2)
                 if resp.status_code == 200:
                     logger.info("✅ Webhook local activo")
@@ -327,6 +339,7 @@ class EventSubService:
         logger.warning(f"⚠️ Timeout esperando webhook después de {timeout}s.")
         self._webhook_checked = True
         return False
+
     # ============================================================
     # VERIFICACIÓN DE SCOPES
     # ============================================================
@@ -402,10 +415,11 @@ class EventSubService:
             return False
 
     # ============================================================
-    # PROCESADOR DE WEBHOOK (punto de entrada desde dashboard)
+    # PROCESADOR DE WEBHOOK (punto de entrada desde webhook.py)
     # ============================================================
 
     def process_webhook(self, message_id: str, event_type: str, event_data: Dict):
+        """Procesa un evento recibido desde el webhook."""
         if self.is_duplicate(message_id):
             self.stats["events_duplicated"] += 1
             logger.info(f"⏭️ Evento duplicado ignorado: {message_id}")
@@ -417,7 +431,13 @@ class EventSubService:
         # Buscar handler
         handler = self._handlers.get(event_type, self._on_generic_event)
         # Ejecutar de forma asíncrona
-        asyncio.run_coroutine_threadsafe(self._safe_handle(handler, event_type, event_data), self.bot.loop)
+        if self.bot and self.bot.loop:
+            asyncio.run_coroutine_threadsafe(
+                self._safe_handle(handler, event_type, event_data),
+                self.bot.loop
+            )
+        else:
+            logger.warning("⚠️ No hay loop disponible para ejecutar handler")
 
     async def _safe_handle(self, handler, event_type, event_data):
         try:
@@ -451,7 +471,8 @@ class EventSubService:
     async def _on_channel_follow(self, data):
         user = data.get("user_name", "Desconocido")
         log_service.add_log('info', f'⭐ Nuevo seguidor: {user}', 'stats')
-        await notification_service.on_follow(self.channel, user)
+        if self.channel:
+            await notification_service.on_follow(self.channel, user)
 
     async def _on_channel_subscribe(self, data):
         user = data.get("user_name", "Desconocido")
@@ -459,7 +480,8 @@ class EventSubService:
         is_gift = data.get("is_gift", False)
         if not is_gift:
             log_service.add_log('info', f'🎉 Nueva suscripción de {user} (Tier {tier})', 'stats')
-            await notification_service.on_subscribe(self.channel, user, tier, "sub")
+            if self.channel:
+                await notification_service.on_subscribe(self.channel, user, tier, "sub")
         else:
             log_service.add_log('info', f'🎁 Suscripción regalada a {user} (Tier {tier})', 'stats')
 
@@ -491,7 +513,8 @@ class EventSubService:
         to_broadcaster = data.get("to_broadcaster_user_name", "Desconocido")
         viewers = data.get("viewers", 0)
         log_service.add_log('info', f'⚔️ Raid de {from_broadcaster} hacia {to_broadcaster} con {viewers} espectadores', 'stats')
-        await notification_service.on_raid(self.channel, from_broadcaster, viewers)
+        if self.channel:
+            await notification_service.on_raid(self.channel, from_broadcaster, viewers)
 
     async def _on_channel_ban(self, data):
         user = data.get("user_name", "Desconocido")
@@ -607,13 +630,16 @@ class EventSubService:
                 return False
 
         try:
+            # NUEVA RUTA: /twitch/webhook
+            callback_url = f"{settings.EVENTSUB_CALLBACK_URL}/twitch/webhook"
+
             payload = {
                 "type": event_def.type,
                 "version": event_def.version,
                 "condition": condition,
                 "transport": {
                     "method": "webhook",
-                    "callback": f"{settings.EVENTSUB_CALLBACK_URL}/webhook/twitch",
+                    "callback": callback_url,
                     "secret": settings.TWITCH_WEBHOOK_SECRET
                 }
             }
