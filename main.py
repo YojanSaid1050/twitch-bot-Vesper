@@ -17,6 +17,7 @@ import threading
 import time
 import asyncio
 import requests
+from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -45,29 +46,52 @@ def run_combined_server():
     """Inicia el servidor combinado (webhook + dashboard) en el puerto asignado."""
     port = int(os.getenv("PORT", "10000"))
     logger.info(f"🚀 Iniciando servidor combinado (webhook + dashboard) en el puerto {port}")
+    app.config['START_TIME'] = datetime.now()
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 
-def wait_for_server_ready(port=None, timeout=60):
-    """Espera a que el servidor combinado esté listo."""
+def wait_for_server_ready(port=None, timeout=60, check_interval=1):
+    """
+    Espera a que el servidor combinado esté listo.
+    
+    Args:
+        port: Puerto donde escucha el servidor
+        timeout: Tiempo máximo de espera en segundos
+        check_interval: Intervalo entre verificaciones
+    
+    Returns:
+        bool: True si el servidor está listo
+    """
     if port is None:
         port = int(os.getenv("PORT", "10000"))
     
-    url = f"http://localhost:{port}/health"
-    logger.info(f"⏳ Esperando que el servidor esté listo en {url}...")
+    # Intentar primero con /health (disponible en dashboard)
+    health_url = f"http://localhost:{port}/health"
+    logger.info(f"⏳ Esperando que el servidor esté listo en {health_url}...")
     
-    start = time.time()
-    while time.time() - start < timeout:
+    start_time = time.time()
+    while time.time() - start_time < timeout:
         try:
-            resp = requests.get(url, timeout=2)
+            resp = requests.get(health_url, timeout=2)
             if resp.status_code == 200:
-                logger.info("✅ Servidor combinado listo")
+                logger.info("✅ Servidor combinado listo (health check OK)")
                 return True
         except:
             pass
-        time.sleep(1)
+        
+        # Fallback: intentar con /twitch/webhook
+        try:
+            webhook_url = f"http://localhost:{port}/twitch/webhook"
+            resp = requests.get(webhook_url, timeout=2)
+            if resp.status_code == 200:
+                logger.info("✅ Servidor combinado listo (webhook check OK)")
+                return True
+        except:
+            pass
+        
+        time.sleep(check_interval)
     
-    logger.warning("⚠️ Timeout esperando servidor")
+    logger.warning(f"⚠️ Timeout esperando servidor después de {timeout}s")
     return False
 
 
@@ -77,6 +101,7 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # BANNER INICIAL
     print("\n" + "=" * 60)
     print("🕯️  VESPERBOT - RELICARIO DEL VACÍO")
     print("=" * 60)
@@ -107,12 +132,15 @@ def main():
     # ============================================================
     # 2. ESPERAR A QUE EL SERVIDOR ESTÉ LISTO
     # ============================================================
+    # Pequeña pausa inicial para que el servidor tenga tiempo de arrancar
+    time.sleep(2)
+    
     if wait_for_server_ready(timeout=60):
         logger.info("✅ Servidor combinado activo")
         log_service.add_log('info', 'Servidor combinado activo', 'main')
     else:
-        logger.warning("⚠️ Servidor no disponible, continuando...")
-        log_service.add_log('warning', 'Servidor no disponible', 'main')
+        logger.warning("⚠️ Servidor no disponible, continuando de todos modos...")
+        log_service.add_log('warning', 'Servidor no disponible, continuando', 'main')
 
     # ============================================================
     # 3. CREAR Y EJECUTAR EL BOT
@@ -122,7 +150,7 @@ def main():
         bot_instance = bot
         set_bot_instance(bot)       # Dashboard
         set_webhook_bot(bot)        # Webhook
-        log_service.add_log('info', 'Bot creado y registrado', 'main')
+        log_service.add_log('info', 'Bot creado y registrado en dashboard y webhook', 'main')
 
         logger.info("=" * 60)
         logger.info("🔮 Conectando al canal de Twitch...")
@@ -135,7 +163,7 @@ def main():
         log_service.add_log('info', 'Bot detenido por el usuario', 'main')
     except Exception as e:
         logger.error(f"❌ Error fatal: {e}")
-        log_service.add_log('critical', f'Error fatal: {e}', 'main')
+        log_service.add_log('critical', f'Error fatal al iniciar el bot: {e}', 'main')
         sys.exit(1)
     finally:
         try:

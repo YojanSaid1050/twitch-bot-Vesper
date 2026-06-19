@@ -1,7 +1,7 @@
 # web/dashboard.py
 """
 Dashboard de configuración para el bot de Twitch
-Se ejecuta en un proceso/hilo separado del webhook
+Se ejecuta en el mismo proceso que el webhook (servidor combinado)
 """
 
 import os
@@ -579,6 +579,23 @@ def not_found(e):
 def internal_error(e):
     logger.error(f"Error interno: {e}")
     return jsonify({"error": "Internal Server Error"}), 500
+
+
+# ============================================
+# RUTA DE HEALTH CHECK (para el servidor combinado)
+# ============================================
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check del servidor combinado (dashboard + webhook)."""
+    return jsonify({
+        "status": "healthy",
+        "service": "VesperBot Dashboard + Webhook",
+        "timestamp": datetime.now().isoformat(),
+        "version": "2.0",
+        "bot_available": _bot_instance is not None,
+        "uptime_seconds": int((datetime.now() - app.config.get('START_TIME', datetime.now())).total_seconds())
+    }), 200
 
 
 # ============================================
@@ -1601,7 +1618,7 @@ def api_twitch_check_user(user_id):
 
 
 # ============================================
-# RUN DASHBOARD
+# RUN DASHBOARD (para ejecución independiente)
 # ============================================
 
 def run_dashboard(port=None):
@@ -1609,10 +1626,10 @@ def run_dashboard(port=None):
     Inicia el servidor del dashboard.
     
     Args:
-        port: Puerto donde escuchar (por defecto 5002, pero se puede pasar)
+        port: Puerto donde escuchar (por defecto usa PORT de entorno o 5002)
     """
     if port is None:
-        port = int(os.getenv("DASHBOARD_PORT", "5002"))
+        port = int(os.getenv("PORT", os.getenv("DASHBOARD_PORT", "5002")))
     wait_for_tokens(timeout=60)
     app.config['START_TIME'] = datetime.now()
     logger.info(f"🚀 Iniciando servidor dashboard en el puerto {port}")

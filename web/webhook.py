@@ -12,7 +12,7 @@ import sys
 import time
 import hmac
 import hashlib
-import threading
+import requests
 from pathlib import Path
 from datetime import datetime, timezone
 from collections import deque
@@ -228,20 +228,30 @@ def wait_for_webhook_ready(port=None, timeout=60, check_interval=1):
     if port is None:
         port = int(os.getenv("PORT", "10000"))
 
+    # Primero intentar con /health
     url = f"http://localhost:{port}/health"
-
     logger.info(f"⏳ Esperando que el servidor webhook esté listo en {url}...")
 
     start_time = time.time()
     while time.time() - start_time < timeout:
         try:
-            import requests
             resp = requests.get(url, timeout=2)
             if resp.status_code == 200:
                 logger.info("✅ Webhook está listo y respondiendo")
                 return True
         except:
             pass
+
+        # Fallback: intentar con /twitch/webhook
+        try:
+            webhook_url = f"http://localhost:{port}/twitch/webhook"
+            resp = requests.get(webhook_url, timeout=2)
+            if resp.status_code == 200:
+                logger.info("✅ Webhook está listo y respondiendo")
+                return True
+        except:
+            pass
+
         time.sleep(check_interval)
 
     logger.warning(f"⚠️ Timeout esperando webhook después de {timeout}s")
