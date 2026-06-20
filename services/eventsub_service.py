@@ -2,9 +2,8 @@
 """
 Servicio EventSub profesional para Twitch Helix API (2026)
 - TODAS las suscripciones se crean con App Access Token (requerido por Twitch)
-- Verifica scopes del broadcaster antes de suscribir
+- Para eventos de moderación, se valida el token del broadcaster antes de crear
 - Espera a que el webhook esté activo
-- Dispatcher central con handlers específicos
 """
 
 import os
@@ -49,6 +48,8 @@ class EventDefinition:
     requires_moderator: bool = False
     requires_user: bool = False
     handler: Optional[str] = None
+    # Indica si este evento requiere verificación de scopes contra el token del moderador
+    requires_moderator_scopes: bool = False
 
     def __post_init__(self):
         if self.handler is None:
@@ -67,7 +68,7 @@ def _build_condition(broadcaster_id: str, moderator_id: str = None, user_id: str
 
 # Lista completa de eventos según documentación oficial 2026
 EVENTS = [
-    # ===== Stream =====
+    # ===== Stream (sin scopes requeridos) =====
     EventDefinition("stream.online", "1", lambda b, m, u: {"broadcaster_user_id": b}),
     EventDefinition("stream.offline", "1", lambda b, m, u: {"broadcaster_user_id": b}),
     EventDefinition("channel.update", "2", lambda b, m, u: {"broadcaster_user_id": b}),
@@ -139,93 +140,112 @@ EVENTS = [
 
     # ===== EVENTOS CON MODERATOR_USER_ID =====
     # Estos requieren que el broadcaster tenga los scopes específicos
+    # Y también requieren verificación del token del moderador
     EventDefinition("channel.follow", "2",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:read:followers"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
 
     EventDefinition("channel.moderator.add", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["channel:manage:moderators"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
     EventDefinition("channel.moderator.remove", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["channel:manage:moderators"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
 
     # Chat (requieren user_id = broadcaster_id)
     EventDefinition("channel.chat.message_delete", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m, user_id=b),
                     required_scopes=["moderator:manage:chat_messages"],
-                    requires_moderator=True, requires_user=True),
+                    requires_moderator=True, requires_user=True,
+                    requires_moderator_scopes=True),
     EventDefinition("channel.chat.clear", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m, user_id=b),
                     required_scopes=["moderator:manage:chat_messages"],
-                    requires_moderator=True, requires_user=True),
+                    requires_moderator=True, requires_user=True,
+                    requires_moderator_scopes=True),
     EventDefinition("channel.chat.clear_user_messages", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m, user_id=b),
                     required_scopes=["moderator:manage:chat_messages"],
-                    requires_moderator=True, requires_user=True),
+                    requires_moderator=True, requires_user=True,
+                    requires_moderator_scopes=True),
 
     # Shoutout
     EventDefinition("channel.shoutout.create", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:shoutouts"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
     EventDefinition("channel.shoutout.receive", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:shoutouts"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
 
     # Ban / Unban - CRÍTICO: requieren moderator:manage:banned_users
     EventDefinition("channel.ban", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:banned_users"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),  # <-- Verificar token del moderador
     EventDefinition("channel.unban", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:banned_users"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),  # <-- Verificar token del moderador
 
     # Shield Mode
     EventDefinition("channel.shield_mode.begin", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:shield_mode"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
     EventDefinition("channel.shield_mode.end", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:shield_mode"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
 
     # Unban Requests
     EventDefinition("channel.unban_request.create", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:unban_requests"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
     EventDefinition("channel.unban_request.resolve", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:unban_requests"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
 
     # Usuarios Sospechosos
     EventDefinition("channel.suspicious_user.message", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:read:suspicious_users"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
     EventDefinition("channel.suspicious_user.update", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:read:suspicious_users"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
 
     # Automod - Según documentación oficial
     EventDefinition("automod.message.hold", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:automod"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
     EventDefinition("automod.message.update", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:automod"],
-                    requires_moderator=True),
+                    requires_moderator=True,
+                    requires_moderator_scopes=True),
 ]
 
 
@@ -259,8 +279,9 @@ class EventSubService:
         self.session.headers.update({"User-Agent": "VesperBotx/1.0"})
         self.HTTP_TIMEOUT = (5, 15)
 
-        # Cache de scopes del broadcaster
+        # Cache de scopes del broadcaster y del bot
         self._broadcaster_scopes = None
+        self._bot_scopes = None
         self._scopes_cache_time = 0
         self._scopes_cache_ttl = 300  # 5 minutos
 
@@ -337,18 +358,12 @@ class EventSubService:
         return False
 
     # ============================================================
-    # VERIFICACIÓN DE SCOPES DEL BROADCASTER
+    # VERIFICACIÓN DE SCOPES DEL BROADCASTER Y BOT
     # ============================================================
 
-    def _get_broadcaster_scopes(self) -> List[str]:
-        """Obtiene los scopes del token del broadcaster desde la API de Twitch."""
-        now = time.time()
-        if self._broadcaster_scopes and (now - self._scopes_cache_time) < self._scopes_cache_ttl:
-            return self._broadcaster_scopes
-
-        token = settings.BROADCASTER_TOKEN
+    def _get_token_scopes(self, token: str) -> List[str]:
+        """Obtiene los scopes de un token desde la API de Twitch."""
         if not token:
-            logger.warning("⚠️ No hay BROADCASTER_TOKEN disponible")
             return []
 
         try:
@@ -365,19 +380,7 @@ class EventSubService:
 
             if r.status_code == 200:
                 data = r.json()
-                self._broadcaster_scopes = data.get("scopes", [])
-                self._scopes_cache_time = now
-                logger.info(f"📋 Scopes del broadcaster obtenidos: {len(self._broadcaster_scopes)}")
-                
-                # Log de scopes críticos para debug
-                critical_scopes = ["moderator:manage:banned_users", "moderator:manage:chat_messages"]
-                for scope in critical_scopes:
-                    if scope in self._broadcaster_scopes:
-                        logger.info(f"   ✅ {scope} presente")
-                    else:
-                        logger.warning(f"   ⚠️ {scope} FALTANTE")
-                
-                return self._broadcaster_scopes
+                return data.get("scopes", [])
             else:
                 logger.warning(f"⚠️ No se pudieron obtener scopes: {r.status_code}")
                 return []
@@ -386,17 +389,48 @@ class EventSubService:
             logger.error(f"❌ Error obteniendo scopes: {e}")
             return []
 
-    def _has_required_scopes(self, required_scopes: List[str]) -> bool:
-        """Verifica si el broadcaster tiene todos los scopes requeridos."""
+    def _get_broadcaster_scopes(self) -> List[str]:
+        """Obtiene los scopes del token del broadcaster."""
+        now = time.time()
+        if self._broadcaster_scopes and (now - self._scopes_cache_time) < self._scopes_cache_ttl:
+            return self._broadcaster_scopes
+
+        token = settings.BROADCASTER_TOKEN
+        self._broadcaster_scopes = self._get_token_scopes(token)
+        self._scopes_cache_time = now
+        logger.info(f"📋 Scopes del broadcaster obtenidos: {len(self._broadcaster_scopes)}")
+        
+        # Log de scopes críticos para debug
+        critical_scopes = ["moderator:manage:banned_users", "moderator:manage:chat_messages"]
+        for scope in critical_scopes:
+            if scope in self._broadcaster_scopes:
+                logger.info(f"   ✅ {scope} presente")
+            else:
+                logger.warning(f"   ⚠️ {scope} FALTANTE")
+        
+        return self._broadcaster_scopes
+
+    def _has_required_scopes(self, required_scopes: List[str], check_moderator: bool = False) -> bool:
+        """
+        Verifica si el broadcaster tiene todos los scopes requeridos.
+        
+        Args:
+            required_scopes: Lista de scopes necesarios
+            check_moderator: Si True, verifica contra el token del bot/moderador
+                            Si False, verifica contra el token del broadcaster
+        """
         if not required_scopes:
             return True
 
-        broadcaster_scopes = self._get_broadcaster_scopes()
-        if not broadcaster_scopes:
+        # Para eventos que requieren scopes de moderador, verificar contra el token del broadcaster
+        # (el broadcaster es el moderador en este caso)
+        scopes = self._get_broadcaster_scopes()
+        
+        if not scopes:
             logger.warning("⚠️ No se pudieron obtener los scopes del broadcaster")
             return False
 
-        missing = [s for s in required_scopes if s not in broadcaster_scopes]
+        missing = [s for s in required_scopes if s not in scopes]
         if missing:
             logger.warning(f"⚠️ Scopes faltantes en el broadcaster: {', '.join(missing)}")
             return False
@@ -615,7 +649,7 @@ class EventSubService:
     def _ensure_subscription(self, app_headers: Dict, event_def: EventDefinition, existing: Set, moderator_id: str):
         """
         Crea una suscripción usando el App Access Token (requerido por Twitch).
-        Primero verifica que el broadcaster tenga los scopes necesarios.
+        Para eventos que requieren scopes de moderador, verifica el token del broadcaster.
         """
         condition = event_def.condition_builder(
             settings.BROADCASTER_ID,
@@ -630,9 +664,11 @@ class EventSubService:
             logger.info(f"⏭️ {event_def.type} ya existe, omitiendo")
             return True
 
-        # 🔑 VERIFICAR SCOPES DEL BROADCASTER (usando su token, no el App Token)
+        # 🔑 VERIFICAR SCOPES DEL BROADCASTER
+        # Para eventos que requieren scopes de moderador, verificar contra el token del broadcaster
         if event_def.required_scopes:
-            if not self._has_required_scopes(event_def.required_scopes):
+            # Siempre verificamos contra el broadcaster (que es el moderador)
+            if not self._has_required_scopes(event_def.required_scopes, check_moderator=False):
                 self.stats["subscriptions_failed_scopes"] += 1
                 logger.warning(f"⚠️ Omitiendo {event_def.type}: Scopes faltantes en el broadcaster: {', '.join(event_def.required_scopes)}")
                 log_service.add_log('warning', f'Omitiendo {event_def.type}: Scopes faltantes en el broadcaster', 'bot')
@@ -684,8 +720,12 @@ class EventSubService:
                     pass
 
                 if r.status_code == 403:
-                    logger.warning(f"⚠️ {event_def.type}: 403 - {error_detail} (scopes insuficientes en el broadcaster)")
-                    log_service.add_log('warning', f'{event_def.type}: 403 - Scopes insuficientes en el broadcaster', 'bot')
+                    # Este error puede ocurrir si:
+                    # 1. El broadcaster no tiene los scopes (ya verificado, pero puede haber cambiado)
+                    # 2. El App Token no tiene permisos suficientes
+                    # 3. El moderator_user_id no coincide con el token del usuario
+                    logger.warning(f"⚠️ {event_def.type}: 403 - {error_detail}")
+                    log_service.add_log('warning', f'{event_def.type}: 403 - Error de autorización', 'bot')
                     self.stats["subscriptions_failed_scopes"] += 1
                 else:
                     logger.error(f"❌ Error en {event_def.type}: {r.status_code} - {error_detail}")
