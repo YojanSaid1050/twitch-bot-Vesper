@@ -6,11 +6,13 @@ Servicio EventSub profesional para Twitch Helix API (2026)
 - Verifica scopes del broadcaster antes de suscribir
 - Espera a que el webhook esté activo
 - Dispatcher central con handlers específicos
+- LOGS DETALLADOS para depuración
 """
 
 import os
 import asyncio
 import time
+import json
 import requests
 import sys
 import io
@@ -196,12 +198,12 @@ EVENTS = [
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:banned_users"],
                     requires_moderator=True,
-                    auth_type='user'),  # <-- User Token
+                    auth_type='user'),
     EventDefinition("channel.unban", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:banned_users"],
                     requires_moderator=True,
-                    auth_type='user'),  # <-- User Token
+                    auth_type='user'),
 
     # ============================================================
     # OTROS EVENTOS DE MODERACIÓN (USER TOKEN)
@@ -367,6 +369,7 @@ class EventSubService:
         """Obtiene los scopes del token del broadcaster desde la API de Twitch."""
         now = time.time()
         if self._broadcaster_scopes and (now - self._scopes_cache_time) < self._scopes_cache_ttl:
+            logger.debug("📋 Scopes del broadcaster desde caché")
             return self._broadcaster_scopes
 
         token = settings.BROADCASTER_TOKEN
@@ -402,28 +405,29 @@ class EventSubService:
                 
                 return self._broadcaster_scopes
             else:
-                logger.warning(f"⚠️ No se pudieron obtener scopes: {r.status_code}")
+                logger.warning(f"⚠️ No se pudieron obtener scopes: {r.status_code} - {r.text[:200]}")
                 return []
 
         except Exception as e:
             logger.error(f"❌ Error obteniendo scopes: {e}")
             return []
 
-    def _has_required_scopes(self, required_scopes: List[str]) -> bool:
+    def _has_required_scopes(self, required_scopes: List[str], event_type: str) -> bool:
         """Verifica si el broadcaster tiene todos los scopes requeridos."""
         if not required_scopes:
             return True
 
         broadcaster_scopes = self._get_broadcaster_scopes()
         if not broadcaster_scopes:
-            logger.warning("⚠️ No se pudieron obtener los scopes del broadcaster")
+            logger.warning(f"⚠️ {event_type}: No se pudieron obtener los scopes del broadcaster")
             return False
 
         missing = [s for s in required_scopes if s not in broadcaster_scopes]
         if missing:
-            logger.warning(f"⚠️ Scopes faltantes en el broadcaster: {', '.join(missing)}")
+            logger.warning(f"⚠️ {event_type}: Scopes faltantes en el broadcaster: {', '.join(missing)}")
             return False
 
+        logger.info(f"✅ {event_type}: Todos los scopes requeridos están presentes")
         return True
 
     # ============================================================
@@ -581,7 +585,12 @@ class EventSubService:
 
     def _get_app_token(self) -> str:
         """Obtiene el App Access Token para crear suscripciones."""
-        return getattr(settings, "APP_ACCESS_TOKEN", "")
+        token = getattr(settings, "APP_ACCESS_TOKEN", "")
+        if token:
+            logger.debug("✅ App Access Token disponible")
+        else:
+            logger.warning("⚠️ App Access Token NO disponible")
+        return token
 
     # ============================================================
     # GESTIÓN DE SUSCRIPCIONES
@@ -596,9 +605,14 @@ class EventSubService:
                 timeout=self.HTTP_TIMEOUT
             )
             if r.status_code != 200:
+                logger.warning(f"⚠️ No se pudieron listar suscripciones: {r.status_code}")
                 return
 
-            for sub in r.json().get("data", []):
+            data = r.json()
+            total = len(data.get("data", []))
+            logger.info(f"📋 Total de suscripciones existentes: {total}")
+
+            for sub in data.get("data", []):
                 if sub.get("status") in (
                     "authorization_revoked",
                     "webhook_callback_verification_failed",
@@ -623,6 +637,7 @@ class EventSubService:
                 timeout=self.HTTP_TIMEOUT
             )
             if r.status_code != 200:
+                logger.warning(f"⚠️ No se pudieron listar suscripciones: {r.status_code}")
                 return set()
 
             existing = set()
@@ -630,6 +645,8 @@ class EventSubService:
                 event_type = sub["type"]
                 condition = tuple(sorted((k, str(v)) for k, v in sub["condition"].items()))
                 existing.add((event_type, condition))
+            
+            logger.info(f"📋 Suscripciones existentes encontradas: {len(existing)}")
             return existing
         except Exception as e:
             logger.error(f"Error obteniendo suscripciones: {e}")
@@ -646,11 +663,17 @@ class EventSubService:
             if not token:
                 # Fallback al token del bot
                 token = settings.BOT_TOKEN
-                token_name = "Bot (User Token)"
+                token_name = "Bot (User Token) [fallback]"
+                logger.warning(f"⚠️ No hay BROADCASTER_TOKEN, usando BOT_TOKEN como fallback para {event_def.type}")
         else:
             # Usar App Token para eventos normales
             token = self._get_app_token()
             token_name = "App Token"
+        
+        if token:
+            logger.debug(f"🔑 Token para {event_def.type}: {token_name} (longitud: {len(token)})")
+        else:
+            logger.error(f"❌ No hay token disponible para {event_def.type} (tipo: {token_name})")
         
         return token, token_name
 
@@ -662,6 +685,7 @@ class EventSubService:
         if event_def.auth_type == 'user':
             # Para eventos de moderación, el moderador debe ser el broadcaster
             effective_moderator_id = settings.BROADCASTER_ID
+            logger.debug(f"🔧 {event_def.type}: Usando BROADCASTER_ID ({effective_moderator_id}) como moderator_user_id")
         else:
             effective_moderator_id = moderator_id
 
@@ -678,19 +702,24 @@ class EventSubService:
             logger.info(f"⏭️ {event_def.type} ya existe, omitiendo")
             return True
 
+        logger.info(f"🔄 {event_def.type}: Creando nueva suscripción...")
+
         # Verificar scopes del broadcaster
         if event_def.required_scopes:
-            if not self._has_required_scopes(event_def.required_scopes):
+            if not self._has_required_scopes(event_def.required_scopes, event_def.type):
                 self.stats["subscriptions_failed_scopes"] += 1
-                logger.warning(f"⚠️ Omitiendo {event_def.type}: Scopes faltantes en el broadcaster")
+                logger.warning(f"⚠️ {event_def.type}: Scopes faltantes, omitiendo")
                 log_service.add_log('warning', f'Omitiendo {event_def.type}: Scopes faltantes en el broadcaster', 'bot')
                 return False
+        else:
+            logger.debug(f"📌 {event_def.type}: No requiere scopes adicionales")
 
         # Obtener token apropiado
         token, token_name = self._get_token_for_event(event_def)
         if not token:
-            logger.error(f"❌ No hay token para {event_def.type}")
+            logger.error(f"❌ {event_def.type}: No hay token disponible, omitiendo")
             log_service.add_log('error', f'No hay token para {event_def.type}', 'bot')
+            self.stats["subscription_errors"] += 1
             return False
 
         headers = {
@@ -713,7 +742,8 @@ class EventSubService:
                 }
             }
 
-            logger.info(f"📡 Intentando suscribir: {event_def.type} (v{event_def.version}) con {token_name}")
+            logger.info(f"📡 {event_def.type}: Enviando solicitud con {token_name}...")
+            logger.debug(f"   Payload: {json.dumps(payload, indent=2)}")
 
             r = self.session.post(
                 "https://api.twitch.tv/helix/eventsub/subscriptions",
@@ -722,56 +752,83 @@ class EventSubService:
                 timeout=self.HTTP_TIMEOUT
             )
 
+            # Log detallado de la respuesta
+            logger.info(f"📊 {event_def.type}: Respuesta HTTP {r.status_code}")
+
             if r.status_code == 202:
                 self.stats["subscriptions_created"] += 1
                 existing.add(key)
-                logger.info(f"✅ Suscrito a {event_def.type} (v{event_def.version})")
-                log_service.add_log('info', f'Suscrito a {event_def.type}', 'bot')
+                logger.info(f"✅ {event_def.type}: Suscrito exitosamente con {token_name}")
+                log_service.add_log('info', f'Suscrito a {event_def.type} con {token_name}', 'bot')
                 return True
 
             if r.status_code == 409:
                 existing.add(key)
                 self.stats["subscriptions_skipped"] += 1
-                logger.info(f"⏭️ {event_def.type} ya existe (409), omitiendo")
+                logger.info(f"⏭️ {event_def.type}: Ya existe (409), omitiendo")
                 return True
 
-            # Errores que no deben reintentarse (400, 401, 403)
-            if r.status_code in (400, 401, 403):
-                error_detail = r.text
-                try:
-                    error_json = r.json()
-                    error_detail = error_json.get("message", r.text)
-                except:
-                    pass
+            # Errores detallados
+            error_detail = r.text
+            try:
+                error_json = r.json()
+                error_detail = error_json.get("message", r.text)
+                if "error" in error_json:
+                    error_detail = f"{error_json.get('error')}: {error_json.get('message', '')}"
+            except:
+                pass
 
-                if r.status_code == 403:
-                    logger.warning(f"⚠️ {event_def.type}: 403 - {error_detail}")
-                    log_service.add_log('warning', f'{event_def.type}: 403 - Error de autorización', 'bot')
-                    self.stats["subscriptions_failed_scopes"] += 1
-                else:
-                    logger.error(f"❌ Error en {event_def.type}: {r.status_code} - {error_detail}")
-                    log_service.add_log('error', f'Error suscribiendo a {event_def.type}: {r.status_code}', 'bot')
-                    self.stats["subscription_errors"] += 1
+            if r.status_code == 403:
+                logger.warning(f"⚠️ {event_def.type}: 403 - {error_detail}")
+                logger.warning(f"   Token usado: {token_name}")
+                logger.warning(f"   Moderator ID: {effective_moderator_id}")
+                log_service.add_log('warning', f'{event_def.type}: 403 - Error de autorización con {token_name}', 'bot')
+                self.stats["subscriptions_failed_scopes"] += 1
                 return False
 
-            # Errores que pueden reintentarse (429, 5xx)
-            if r.status_code in (429, 500, 502, 503, 504):
-                logger.warning(f"⚠️ {event_def.type}: {r.status_code} - reintentando más tarde")
+            elif r.status_code == 400:
+                logger.error(f"❌ {event_def.type}: 400 - {error_detail}")
+                logger.error(f"   Token usado: {token_name}")
+                logger.error(f"   Condition: {condition}")
+                log_service.add_log('error', f'{event_def.type}: 400 - {error_detail}', 'bot')
+                self.stats["subscription_errors"] += 1
                 return False
 
+            elif r.status_code == 401:
+                logger.error(f"❌ {event_def.type}: 401 - {error_detail}")
+                logger.error(f"   Token usado: {token_name}")
+                log_service.add_log('error', f'{event_def.type}: 401 - Token inválido', 'bot')
+                self.stats["subscription_errors"] += 1
+                return False
+
+            elif r.status_code in (429, 500, 502, 503, 504):
+                logger.warning(f"⚠️ {event_def.type}: {r.status_code} - Error temporal, reintentando más tarde")
+                log_service.add_log('warning', f'{event_def.type}: {r.status_code} - Error temporal', 'bot')
+                return False
+
+            else:
+                self.stats["subscription_errors"] += 1
+                logger.error(f"❌ {event_def.type}: Error {r.status_code} - {error_detail}")
+                log_service.add_log('error', f'Error suscribiendo a {event_def.type}: {r.status_code}', 'bot')
+                return False
+
+        except requests.exceptions.Timeout:
+            logger.error(f"❌ {event_def.type}: Timeout")
+            log_service.add_log('error', f'Timeout suscribiendo a {event_def.type}', 'bot')
             self.stats["subscription_errors"] += 1
-            logger.error(f"❌ Error en {event_def.type}: {r.status_code} - {r.text}")
-            log_service.add_log('error', f'Error suscribiendo a {event_def.type}: {r.status_code}', 'bot')
             return False
-
         except Exception as e:
             self.stats["subscription_errors"] += 1
-            logger.error(f"❌ Excepción en {event_def.type}: {e}", exc_info=True)
+            logger.error(f"❌ {event_def.type}: Excepción - {e}", exc_info=True)
             log_service.add_log('error', f'Excepción suscribiendo a {event_def.type}: {e}', 'bot')
             return False
 
     def subscribe_to_events(self):
         """Punto de entrada principal para crear todas las suscripciones."""
+        logger.info("=" * 60)
+        logger.info("🚀 INICIANDO SUSCRIPCIÓN A EVENTSUB")
+        logger.info("=" * 60)
+
         # Esperar a que el webhook esté activo
         if not self.wait_for_webhook(timeout=60):
             logger.warning("⚠️ Webhook no disponible, pero continuando con suscripciones...")
@@ -795,6 +852,15 @@ class EventSubService:
         broadcaster_scopes = self._get_broadcaster_scopes()
         if not broadcaster_scopes:
             logger.warning("⚠️ No se pudieron obtener los scopes del broadcaster. Algunas suscripciones pueden fallar.")
+        else:
+            logger.info(f"✅ Scopes del broadcaster: {len(broadcaster_scopes)}")
+            # Mostrar scopes críticos
+            critical = ["moderator:manage:banned_users", "moderator:manage:chat_messages", "moderator:read:followers"]
+            for scope in critical:
+                if scope in broadcaster_scopes:
+                    logger.info(f"   ✅ {scope}")
+                else:
+                    logger.warning(f"   ❌ {scope}")
 
         # Limpiar suscripciones inválidas (usando App Token para listar)
         app_headers = {
@@ -809,24 +875,67 @@ class EventSubService:
 
         # IDs necesarios
         moderator_id = getattr(settings, "MODERATOR_USER_ID", settings.BROADCASTER_ID)
+        logger.info(f"📌 Moderator ID: {moderator_id}")
+        logger.info(f"📌 Broadcaster ID: {settings.BROADCASTER_ID}")
 
-        logger.info(f"📡 Suscribiendo {len(EVENTS)} eventos")
-        log_service.add_log('info', f'Suscribiendo {len(EVENTS)} eventos', 'bot')
+        # Separar eventos por tipo
+        app_events = [e for e in EVENTS if e.auth_type == 'app']
+        user_events = [e for e in EVENTS if e.auth_type == 'user']
+
+        logger.info(f"📡 Total de eventos: {len(EVENTS)}")
+        logger.info(f"   • App Token: {len(app_events)} eventos")
+        logger.info(f"   • User Token: {len(user_events)} eventos")
 
         successful = 0
         failed = 0
 
-        for event_def in EVENTS:
+        # Primero, suscribir eventos con App Token
+        logger.info("\n" + "-" * 40)
+        logger.info("📡 SUSCRIBIENDO EVENTOS CON APP TOKEN")
+        logger.info("-" * 40)
+
+        for event_def in app_events:
             result = self._ensure_subscription(event_def, existing, moderator_id)
             if result:
                 successful += 1
             else:
                 failed += 1
-            # Pequeña pausa para evitar rate limiting
-            time.sleep(0.5)
+            time.sleep(0.3)  # Pausa para evitar rate limiting
 
-        logger.info(f"📊 Resultado: {successful} suscripciones creadas, {failed} fallidas, {len(existing)} existentes")
-        log_service.add_log('info', f'EventSub: {successful} creadas, {failed} fallidas', 'bot')
+        # Luego, suscribir eventos con User Token (moderación)
+        logger.info("\n" + "-" * 40)
+        logger.info("📡 SUSCRIBIENDO EVENTOS CON USER TOKEN (MODERACIÓN)")
+        logger.info("-" * 40)
+
+        for event_def in user_events:
+            result = self._ensure_subscription(event_def, existing, moderator_id)
+            if result:
+                successful += 1
+            else:
+                failed += 1
+            time.sleep(0.5)  # Pausa más larga para eventos de moderación
+
+        # Resumen final
+        logger.info("\n" + "=" * 60)
+        logger.info("📊 RESUMEN FINAL DE SUSCRIPCIONES")
+        logger.info("=" * 60)
+        logger.info(f"✅ Creadas exitosamente: {successful}")
+        logger.info(f"❌ Fallidas: {failed}")
+        logger.info(f"⏭️ Omitidas (ya existentes): {len(existing)}")
+        logger.info(f"📊 Total eventos procesados: {len(EVENTS)}")
+
+        # Detalle de fallos
+        if failed > 0:
+            logger.warning(f"⚠️ {failed} eventos fallaron. Revisa los logs anteriores para más detalles.")
+            logger.warning("   Posibles causas:")
+            logger.warning("   - Scopes faltantes en el broadcaster")
+            logger.warning("   - Token inválido o expirado")
+            logger.warning("   - Problemas de red o timeout")
+            logger.warning("   - El moderator_user_id no coincide con el token usado")
+        else:
+            logger.info("✅ ¡Todas las suscripciones se completaron exitosamente!")
+
+        log_service.add_log('info', f'EventSub: {successful} creadas, {failed} fallidas, {len(existing)} existentes', 'bot')
 
     # ============================================================
     # CIERRE
