@@ -217,7 +217,7 @@ EVENTS = [
                     required_scopes=["moderator:read:suspicious_users"],
                     requires_moderator=True),
 
-    # Automod
+    # Automod - Según documentación oficial
     EventDefinition("automod.message.hold", "1",
                     lambda b, m, u: _build_condition(b, moderator_id=m),
                     required_scopes=["moderator:manage:automod"],
@@ -683,11 +683,7 @@ class EventSubService:
                 except:
                     pass
 
-                if r.status_code == 400 and "auth must use app access token" in error_detail.lower():
-                    # Esto no debería pasar ahora que usamos App Token
-                    logger.error(f"❌ {event_def.type}: 400 - {error_detail} (¿App Token no válido?)")
-                    log_service.add_log('error', f'{event_def.type}: 400 - App Token no válido', 'bot')
-                elif r.status_code == 403:
+                if r.status_code == 403:
                     logger.warning(f"⚠️ {event_def.type}: 403 - {error_detail} (scopes insuficientes en el broadcaster)")
                     log_service.add_log('warning', f'{event_def.type}: 403 - Scopes insuficientes en el broadcaster', 'bot')
                     self.stats["subscriptions_failed_scopes"] += 1
