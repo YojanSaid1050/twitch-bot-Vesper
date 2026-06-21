@@ -153,8 +153,8 @@
     </div>
     <div class="card-body">
 
-        <!-- Filtros (solo nivel) -->
-        <div class="logs-filters" style="grid-template-columns: 1fr auto;">
+        <!-- Filtros (nivel + tipo de evento) -->
+        <div class="logs-filters" style="grid-template-columns: 1fr 1fr auto;">
             <div class="filter-group">
                 <label><i class="fas fa-tag"></i> Nivel</label>
                 <select id="mod-filter-level" class="form-control">
@@ -163,6 +163,14 @@
                     <option value="WARNING">WARNING</option>
                     <option value="ERROR">ERROR</option>
                     <option value="CRITICAL">CRITICAL</option>
+                </select>
+            </div>
+            <!-- NUEVO: Filtro por tipo de evento -->
+            <div class="filter-group">
+                <label><i class="fas fa-flag"></i> Tipo de evento</label>
+                <select id="mod-filter-type" class="form-control">
+                    <option value="">Todos</option>
+                    <!-- Se llenará dinámicamente desde JavaScript -->
                 </select>
             </div>
             <div class="filter-actions">
@@ -708,28 +716,29 @@
     // PANEL DE CONTROL GLOBAL
     // ============================================
     function clearAllLogs() {
-    showModal('Confirmar limpieza', '¿Estás seguro de que quieres eliminar <strong>todos</strong> los logs de todos los paneles? Esta acción no se puede deshacer.', 'Limpiar todo', 'Cancelar', 'danger')
-        .then(confirmed => {
-            if (!confirmed) return;
-            fetch('/api/logs/clear', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({})
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    showToast('Todos los logs limpiados', 'success');
-                    refreshAllLogs();
-                } else {
-                    showToast('Error: ' + data.error, 'error');
-                }
-            })
-            .catch(() => showToast('Error al limpiar logs', 'error'));
-        });
-}
+        showModal('Confirmar limpieza', '¿Estás seguro de que quieres eliminar <strong>todos</strong> los logs de todos los paneles? Esta acción no se puede deshacer.', 'Limpiar todo', 'Cancelar', 'danger')
+            .then(confirmed => {
+                if (!confirmed) return;
+                fetch('/api/logs/clear', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({})
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        showToast('Todos los logs limpiados', 'success');
+                        refreshAllLogs();
+                    } else {
+                        showToast('Error: ' + data.error, 'error');
+                    }
+                })
+                .catch(() => showToast('Error al limpiar logs', 'error'));
+            });
+    }
+
     function refreshAllLogs() {
         refreshLogs();
         refreshModLogs();
@@ -779,7 +788,6 @@
                     systemSources.forEach(source => {
                         const opt = document.createElement('option');
                         opt.value = source;
-                        // Usar etiqueta amigable si existe
                         opt.textContent = sourceLabels[source] || source;
                         select.appendChild(opt);
                     });
@@ -878,9 +886,31 @@
     document.getElementById('filter-limit').addEventListener('change', applyFilters);
 
     // ============================================
-    // LOGS DE MODERACIÓN
+    // LOGS DE MODERACIÓN (con filtro por tipo de evento)
     // ============================================
-    function loadModLogs(level, limit) {
+
+    // Función para extraer el tipo de evento del mensaje
+    function extractEventType(message) {
+        const msg = message.toLowerCase();
+        if (msg.includes('timeout')) return 'Timeout';
+        if (msg.includes('ban') && !msg.includes('unban')) return 'Ban';
+        if (msg.includes('unban')) return 'Unban';
+        if (msg.includes('advertencia') || msg.includes('warn')) return 'Advertencia';
+        if (msg.includes('vip') && !msg.includes('unvip')) return 'VIP';
+        if (msg.includes('unvip')) return 'Unvip';
+        if (msg.includes('modo lento')) return 'Modo lento';
+        if (msg.includes('modo seguidores')) return 'Modo seguidores';
+        if (msg.includes('modo emotes')) return 'Modo emotes';
+        if (msg.includes('modo suscriptores')) return 'Modo suscriptores';
+        if (msg.includes('limpiar chat') || msg.includes('chat limpiado')) return 'Limpiar chat';
+        if (msg.includes('shoutout')) return 'Shoutout';
+        if (msg.includes('anuncio') || msg.includes('announce')) return 'Anuncio';
+        if (msg.includes('palabra prohibida')) return 'Palabra prohibida';
+        if (msg.includes('enlace bloqueado')) return 'Enlace bloqueado';
+        return 'Otro';
+    }
+
+    function loadModLogs(level, type, limit) {
         if (modIsLoading) return;
         modIsLoading = true;
         let url = `/api/logs/moderation?limit=${limit || 100}`;
@@ -891,13 +921,41 @@
             .then(data => {
                 const tbody = document.getElementById('mod-logs-body');
                 const count = document.getElementById('mod-logs-count');
-                if (!data.logs || data.logs.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="3" class="text-center" style="color:var(--text-muted); padding:40px;"><i class="fas fa-inbox" style="font-size:24px; display:block; margin-bottom:8px; opacity:0.4;"></i>No hay logs de moderación</td></tr>`;
+                const filterTypeSelect = document.getElementById('mod-filter-type');
+
+                // Extraer tipos únicos de los logs
+                const types = new Set();
+                data.logs.forEach(log => {
+                    const eventType = extractEventType(log.message);
+                    types.add(eventType);
+                });
+                // Llenar el selector con los tipos únicos (manteniendo la opción "Todos")
+                const currentValue = filterTypeSelect.value;
+                filterTypeSelect.innerHTML = '<option value="">Todos</option>';
+                Array.from(types).sort().forEach(t => {
+                    const opt = document.createElement('option');
+                    opt.value = t;
+                    opt.textContent = t;
+                    filterTypeSelect.appendChild(opt);
+                });
+                // Restaurar selección si aún existe
+                if (currentValue && types.has(currentValue)) {
+                    filterTypeSelect.value = currentValue;
+                }
+
+                // Aplicar filtro de tipo si está seleccionado
+                let filtered = data.logs;
+                if (type) {
+                    filtered = filtered.filter(log => extractEventType(log.message) === type);
+                }
+
+                if (filtered.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="3" class="text-center" style="color:var(--text-muted); padding:40px;"><i class="fas fa-inbox" style="font-size:24px; display:block; margin-bottom:8px; opacity:0.4;"></i>No hay logs de moderación para estos filtros</td></tr>`;
                     count.textContent = '0';
                     return;
                 }
-                count.textContent = data.logs.length;
-                tbody.innerHTML = data.logs.map(log => `
+                count.textContent = filtered.length;
+                tbody.innerHTML = filtered.map(log => `
                     <tr class="log-level-${log.level}">
                         <td><strong>${log.level}</strong></td>
                         <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">${new Date(log.timestamp).toLocaleString()}</td>
@@ -920,8 +978,9 @@
 
     function applyModFilters() {
         const level = document.getElementById('mod-filter-level').value;
+        const type = document.getElementById('mod-filter-type').value;
         const limit = 100;
-        loadModLogs(level, limit);
+        loadModLogs(level, type, limit);
     }
 
     function refreshModLogs() { applyModFilters(); }
@@ -960,6 +1019,7 @@
 
     document.getElementById('mod-auto-refresh-toggle').addEventListener('change', function () { toggleModAutoRefresh(this.checked); });
     document.getElementById('mod-filter-level').addEventListener('change', applyModFilters);
+    document.getElementById('mod-filter-type').addEventListener('change', applyModFilters);
 
     // ============================================
     // LOGS DE ESTADÍSTICAS
@@ -1074,6 +1134,7 @@
 </script>
 
 {% endblock %}
+
 <script>
 // Sobrescribir funciones comunes para usar executeAction
 (function() {

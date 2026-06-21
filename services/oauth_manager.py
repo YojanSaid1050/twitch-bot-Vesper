@@ -8,6 +8,7 @@ class TokenType(Enum):
     BOT = "bot"
     BROADCASTER = "broadcaster"
     APP = "app"
+    MODERATOR = "moderator"   # ← Agregado para sincronizar con el bot
     SPOTIFY = "spotify"
 
 class OAuthError(Exception):

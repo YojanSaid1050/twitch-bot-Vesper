@@ -1,892 +1,175 @@
 # services/eventsub_service.py
 """
-Servicio EventSub profesional para Twitch Helix API (2026)
-- TODAS las suscripciones se crean con App Access Token (requerido por Twitch)
-- Verifica scopes del broadcaster antes de suscribir
-- CONDICIONES CORRECTAS según documentación oficial
-- LOGS DETALLADOS para depuración
+Fachada del sistema EventSub.
+Únicamente expone la API pública.
 """
 
-import os
-import asyncio
-import time
-import json
-import requests
-import sys
-import io
-from collections import deque
-from threading import Lock
-from typing import Dict, Set, Tuple, Optional, Any, List, Callable
-from dataclasses import dataclass, field
-
-from config import settings
-from services.notification_service import notification_service
-from services.log_service import log_service
+from services.eventsub.manager import manager
+from services.eventsub.dispatcher import dispatcher
+from services.eventsub.webhook import webhook_handler
+from services.eventsub.deduplicator import deduplicator
+from services.eventsub.statistics import stats_collector
+from services.eventsub.metrics import metrics_collector
+from services.eventsub.event_bus import event_bus
+from services.eventsub.handlers import *
 from utils.logger import get_logger
-
-# Forzar UTF-8 para emojis
-try:
-    if hasattr(sys.stdout, 'encoding') and sys.stdout.encoding != 'UTF-8':
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    if hasattr(sys.stderr, 'encoding') and sys.stderr.encoding != 'UTF-8':
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-except (AttributeError, TypeError, ValueError):
-    pass
 
 logger = get_logger(__name__)
 
 
-# ============================================================
-# DEFINICIÓN DE EVENTOS (Estructura central)
-# ============================================================
-
-@dataclass
-class EventDefinition:
-    """Define un evento EventSub con todos sus requisitos."""
-    type: str
-    version: str
-    condition_builder: Callable  # (broadcaster_id, user_id) -> dict
-    required_scopes: List[str] = field(default_factory=list)
-    handler: Optional[str] = None
-    # Si el evento requiere user_id en la condición (ej: eventos de chat)
-    requires_user: bool = False
-
-    def __post_init__(self):
-        if self.handler is None:
-            self.handler = self.type.replace('.', '_')
-
-
-# ============================================================
-# FUNCIONES DE CONSTRUCCIÓN DE CONDICIONES
-# ============================================================
-
-def _condition_broadcaster_only(broadcaster_id: str, user_id: str = None) -> Dict:
-    """Condición que solo requiere broadcaster_user_id."""
-    return {"broadcaster_user_id": broadcaster_id}
-
-def _condition_broadcaster_moderator(broadcaster_id: str, user_id: str = None) -> Dict:
-    """Condición que requiere broadcaster_user_id y moderator_user_id."""
-    return {
-        "broadcaster_user_id": broadcaster_id,
-        "moderator_user_id": broadcaster_id  # El broadcaster es el moderador
-    }
-
-def _condition_broadcaster_user(broadcaster_id: str, user_id: str = None) -> Dict:
-    """Condición que requiere broadcaster_user_id y user_id."""
-    return {
-        "broadcaster_user_id": broadcaster_id,
-        "user_id": user_id or broadcaster_id
-    }
-
-def _condition_broadcaster_moderator_user(broadcaster_id: str, user_id: str = None) -> Dict:
-    """Condición que requiere broadcaster_user_id, moderator_user_id y user_id."""
-    return {
-        "broadcaster_user_id": broadcaster_id,
-        "moderator_user_id": broadcaster_id,
-        "user_id": user_id or broadcaster_id
-    }
-
-def _condition_raid(broadcaster_id: str, user_id: str = None) -> Dict:
-    """Condición para channel.raid (usa to_broadcaster_user_id)."""
-    return {"to_broadcaster_user_id": broadcaster_id}
-
-
-# ============================================================
-# LISTA DE EVENTOS SEGÚN DOCUMENTACIÓN OFICIAL
-# ============================================================
-
-EVENTS = [
-    # ==========================================================
-    # STREAM (solo broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("stream.online", "1", _condition_broadcaster_only),
-    EventDefinition("stream.offline", "1", _condition_broadcaster_only),
-    EventDefinition("channel.update", "2", _condition_broadcaster_only),
-
-    # ==========================================================
-    # SUSCRIPCIONES (solo broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("channel.subscribe", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:subscriptions"]),
-    EventDefinition("channel.subscription.end", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:subscriptions"]),
-    EventDefinition("channel.subscription.gift", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:subscriptions"]),
-    EventDefinition("channel.subscription.message", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:subscriptions"]),
-
-    # ==========================================================
-    # CHEERS (solo broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("channel.cheer", "1", _condition_broadcaster_only,
-                    required_scopes=["bits:read"]),
-
-    # ==========================================================
-    # RAID (to_broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("channel.raid", "1", _condition_raid),
-
-    # ==========================================================
-    # VIP (solo broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("channel.vip.add", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:vips"]),
-    EventDefinition("channel.vip.remove", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:vips"]),
-
-    # ==========================================================
-    # PREDICCIONES (solo broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("channel.prediction.begin", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:predictions"]),
-    EventDefinition("channel.prediction.progress", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:predictions"]),
-    EventDefinition("channel.prediction.lock", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:predictions"]),
-    EventDefinition("channel.prediction.end", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:predictions"]),
-
-    # ==========================================================
-    # ENCUESTAS (solo broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("channel.poll.begin", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:polls"]),
-    EventDefinition("channel.poll.progress", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:polls"]),
-    EventDefinition("channel.poll.end", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:polls"]),
-
-    # ==========================================================
-    # METAS (solo broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("channel.goal.begin", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:goals"]),
-    EventDefinition("channel.goal.progress", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:goals"]),
-    EventDefinition("channel.goal.end", "1", _condition_broadcaster_only,
-                    required_scopes=["channel:read:goals"]),
-
-    # ==========================================================
-    # HYPE TRAIN (solo broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("channel.hype_train.begin", "2", _condition_broadcaster_only,
-                    required_scopes=["channel:read:hype_train"]),
-    EventDefinition("channel.hype_train.progress", "2", _condition_broadcaster_only,
-                    required_scopes=["channel:read:hype_train"]),
-    EventDefinition("channel.hype_train.end", "2", _condition_broadcaster_only,
-                    required_scopes=["channel:read:hype_train"]),
-
-    # ==========================================================
-    # REDENCIONES (solo broadcaster_user_id)
-    # ==========================================================
-    EventDefinition("channel.channel_points_custom_reward_redemption.add", "1",
-                    _condition_broadcaster_only,
-                    required_scopes=["channel:read:redemptions"]),
-    EventDefinition("channel.channel_points_custom_reward_redemption.update", "1",
-                    _condition_broadcaster_only,
-                    required_scopes=["channel:read:redemptions"]),
-
-    # ==========================================================
-    # FOLLOW (broadcaster_user_id + moderator_user_id)
-    # ==========================================================
-    EventDefinition("channel.follow", "2",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:read:followers"]),
-
-    # ==========================================================
-    # MODERADORES (broadcaster_user_id + moderator_user_id)
-    # ==========================================================
-    EventDefinition("channel.moderator.add", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["channel:manage:moderators"]),
-    EventDefinition("channel.moderator.remove", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["channel:manage:moderators"]),
-
-    # ==========================================================
-    # CHAT (broadcaster_user_id + moderator_user_id + user_id)
-    # ==========================================================
-    EventDefinition("channel.chat.message_delete", "1",
-                    _condition_broadcaster_moderator_user,
-                    required_scopes=["moderator:manage:chat_messages"]),
-    EventDefinition("channel.chat.clear", "1",
-                    _condition_broadcaster_moderator_user,
-                    required_scopes=["moderator:manage:chat_messages"]),
-    EventDefinition("channel.chat.clear_user_messages", "1",
-                    _condition_broadcaster_moderator_user,
-                    required_scopes=["moderator:manage:chat_messages"]),
-
-    # ==========================================================
-    # SHOUTOUT (broadcaster_user_id + moderator_user_id)
-    # ==========================================================
-    EventDefinition("channel.shoutout.create", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:manage:shoutouts"]),
-    EventDefinition("channel.shoutout.receive", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:manage:shoutouts"]),
-
-    # ==========================================================
-    # ⚠️ BAN / UNBAN - SOLO BROADCASTER_USER_ID
-    # ==========================================================
-    EventDefinition("channel.ban", "1",
-                    _condition_broadcaster_only,  # <-- SOLO broadcaster_user_id
-                    required_scopes=["moderator:manage:banned_users"]),
-    EventDefinition("channel.unban", "1",
-                    _condition_broadcaster_only,  # <-- SOLO broadcaster_user_id
-                    required_scopes=["moderator:manage:banned_users"]),
-
-    # ==========================================================
-    # SHIELD MODE (broadcaster_user_id + moderator_user_id)
-    # ==========================================================
-    EventDefinition("channel.shield_mode.begin", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:manage:shield_mode"]),
-    EventDefinition("channel.shield_mode.end", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:manage:shield_mode"]),
-
-    # ==========================================================
-    # UNBAN REQUESTS (broadcaster_user_id + moderator_user_id)
-    # ==========================================================
-    EventDefinition("channel.unban_request.create", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:manage:unban_requests"]),
-    EventDefinition("channel.unban_request.resolve", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:manage:unban_requests"]),
-
-    # ==========================================================
-    # USUARIOS SOSPECHOSOS (broadcaster_user_id + moderator_user_id)
-    # ==========================================================
-    EventDefinition("channel.suspicious_user.message", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:read:suspicious_users"]),
-    EventDefinition("channel.suspicious_user.update", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:read:suspicious_users"]),
-
-    # ==========================================================
-    # AUTOMOD (broadcaster_user_id + moderator_user_id)
-    # ==========================================================
-    EventDefinition("automod.message.hold", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:manage:automod"]),
-    EventDefinition("automod.message.update", "1",
-                    _condition_broadcaster_moderator,
-                    required_scopes=["moderator:manage:automod"]),
-]
-
-
-# ============================================================
-# SERVICIO PRINCIPAL
-# ============================================================
-
 class EventSubService:
+    """Fachada del sistema EventSub."""
+
     def __init__(self):
-        self.bot = None
-        self.channel = None
-        self._webhook_ready = False
-        self._webhook_checked = False
-
-        # Deduplicación
-        self._lock = Lock()
-        self._processed_ids = set()
-        self._processed_queue = deque(maxlen=5000)
-
-        # Estadísticas
-        self.stats = {
-            "subscriptions_created": 0,
-            "subscriptions_skipped": 0,
-            "subscription_errors": 0,
-            "subscriptions_failed_scopes": 0,
-            "events_processed": 0,
-            "events_duplicated": 0,
-        }
-
-        self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "VesperBotx/1.0"})
-        self.HTTP_TIMEOUT = (5, 15)
-
-        # Cache de scopes del broadcaster
-        self._broadcaster_scopes = None
-        self._scopes_cache_time = 0
-        self._scopes_cache_ttl = 300  # 5 minutos
-
-        # Handlers
-        self._handlers = {}
-        self._register_handlers()
+        self._manager = manager
+        self._dispatcher = dispatcher
+        self._webhook_handler = webhook_handler
+        self._deduplicator = deduplicator
+        self._stats = stats_collector
+        self._metrics = metrics_collector
+        self._event_bus = event_bus
+        self._bot = None
+        self._initialized = False
 
     def set_bot(self, bot):
-        """Establece la instancia del bot para procesar eventos y obtener el canal."""
-        self.bot = bot
-        if bot and bot.connected_channels:
-            self.channel = bot.connected_channels[0]
-            logger.info(f"📺 Canal establecido: {self.channel.name}")
-            log_service.add_log('info', f'Canal establecido: {self.channel.name}', 'bot')
-        else:
-            logger.info("🤖 Bot registrado en EventSubService")
+        """Establece la instancia del bot."""
+        self._bot = bot
+        if not self._initialized:
+            self._register_handlers()
+            self._initialized = True
 
     def _register_handlers(self):
-        """Registra los handlers para cada tipo de evento."""
-        for event in EVENTS:
-            handler_name = f"_on_{event.handler}"
-            if hasattr(self, handler_name):
-                self._handlers[event.type] = getattr(self, handler_name)
-            else:
-                logger.debug(f"No se encontró handler para {event.type}, se usará el genérico")
-                self._handlers[event.type] = self._on_generic_event
-
-    # ============================================================
-    # ESPERA DEL WEBHOOK
-    # ============================================================
-
-    def wait_for_webhook(self, timeout: int = 60, check_interval: int = 2):
-        """Espera a que el webhook esté activo en la ruta /twitch/webhook."""
-        if self._webhook_checked and self._webhook_ready:
-            return True
-
-        callback_url = settings.EVENTSUB_CALLBACK_URL
-        if not callback_url:
-            logger.error("❌ EVENTSUB_CALLBACK_URL no configurado")
-            return False
-
-        webhook_url = f"{callback_url}/twitch/webhook"
-        logger.info(f"⏳ Esperando que el webhook esté activo: {webhook_url}")
-
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                resp = requests.get(webhook_url, timeout=5)
-                if resp.status_code == 200:
-                    logger.info("✅ Webhook activo y respondiendo")
-                    self._webhook_ready = True
-                    self._webhook_checked = True
-                    return True
-            except:
-                pass
-
-            # Fallback a localhost (para desarrollo)
-            try:
-                port = os.getenv("PORT", "10000")
-                local_url = f"http://localhost:{port}/twitch/webhook"
-                resp = requests.get(local_url, timeout=2)
-                if resp.status_code == 200:
-                    logger.info("✅ Webhook local activo")
-                    self._webhook_ready = True
-                    self._webhook_checked = True
-                    return True
-            except:
-                pass
-
-            time.sleep(check_interval)
-
-        logger.warning(f"⚠️ Timeout esperando webhook después de {timeout}s.")
-        self._webhook_checked = True
-        return False
-
-    # ============================================================
-    # VERIFICACIÓN DE SCOPES DEL BROADCASTER
-    # ============================================================
-
-    def _get_broadcaster_scopes(self) -> List[str]:
-        """
-        Obtiene los scopes del token del broadcaster.
-        Esto se usa SOLO para verificar permisos, NO para autenticar la creación.
-        """
-        now = time.time()
-        if self._broadcaster_scopes and (now - self._scopes_cache_time) < self._scopes_cache_ttl:
-            logger.debug("📋 Scopes del broadcaster desde caché")
-            return self._broadcaster_scopes
-
-        token = settings.BROADCASTER_TOKEN
-        if not token:
-            logger.warning("⚠️ No hay BROADCASTER_TOKEN disponible")
-            return []
-
-        try:
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Client-Id": settings.CLIENT_ID
-            }
-
-            r = self.session.get(
-                "https://id.twitch.tv/oauth2/validate",
-                headers=headers,
-                timeout=10
-            )
-
-            if r.status_code == 200:
-                data = r.json()
-                self._broadcaster_scopes = data.get("scopes", [])
-                self._scopes_cache_time = now
-                logger.info(f"📋 Scopes del broadcaster obtenidos: {len(self._broadcaster_scopes)}")
-                
-                # Log de scopes críticos para debug
-                critical_scopes = ["moderator:manage:banned_users", "moderator:manage:chat_messages"]
-                for scope in critical_scopes:
-                    if scope in self._broadcaster_scopes:
-                        logger.info(f"   ✅ {scope} presente")
-                    else:
-                        logger.warning(f"   ⚠️ {scope} FALTANTE")
-                
-                return self._broadcaster_scopes
-            else:
-                logger.warning(f"⚠️ No se pudieron obtener scopes: {r.status_code} - {r.text[:200]}")
-                return []
-
-        except Exception as e:
-            logger.error(f"❌ Error obteniendo scopes: {e}")
-            return []
-
-    def _has_required_scopes(self, required_scopes: List[str], event_type: str) -> bool:
-        """Verifica si el broadcaster tiene todos los scopes requeridos."""
-        if not required_scopes:
-            return True
-
-        broadcaster_scopes = self._get_broadcaster_scopes()
-        if not broadcaster_scopes:
-            logger.warning(f"⚠️ {event_type}: No se pudieron obtener los scopes del broadcaster")
-            return False
-
-        missing = [s for s in required_scopes if s not in broadcaster_scopes]
-        if missing:
-            logger.warning(f"⚠️ {event_type}: Scopes faltantes en el broadcaster: {', '.join(missing)}")
-            return False
-
-        logger.info(f"✅ {event_type}: Todos los scopes requeridos están presentes")
-        return True
-
-    # ============================================================
-    # DEDUPLICACIÓN
-    # ============================================================
-
-    def is_duplicate(self, message_id: str) -> bool:
-        with self._lock:
-            if message_id in self._processed_ids:
-                return True
-
-            self._processed_ids.add(message_id)
-            self._processed_queue.append(message_id)
-
-            if len(self._processed_queue) == self._processed_queue.maxlen:
-                oldest = self._processed_queue[0]
-                self._processed_ids.discard(oldest)
-
-            return False
-
-    # ============================================================
-    # PROCESADOR DE WEBHOOK
-    # ============================================================
-
-    def process_webhook(self, message_id: str, event_type: str, event_data: Dict):
-        """Procesa un evento recibido desde el webhook."""
-        if self.is_duplicate(message_id):
-            self.stats["events_duplicated"] += 1
-            logger.info(f"⏭️ Evento duplicado ignorado: {message_id}")
-            return
-
-        self.stats["events_processed"] += 1
-        logger.info(f"📨 Evento {event_type} recibido (ID: {message_id})")
-
-        handler = self._handlers.get(event_type, self._on_generic_event)
-        if self.bot and self.bot.loop:
-            asyncio.run_coroutine_threadsafe(
-                self._safe_handle(handler, event_type, event_data),
-                self.bot.loop
-            )
-        else:
-            logger.warning("⚠️ No hay loop disponible para ejecutar handler")
-
-    async def _safe_handle(self, handler, event_type, event_data):
-        try:
-            await handler(event_data)
-        except Exception as e:
-            logger.error(f"Error en handler de {event_type}: {e}", exc_info=True)
-            log_service.add_log('error', f'Error en handler de {event_type}: {e}', 'bot')
-
-    # ============================================================
-    # HANDLERS
-    # ============================================================
-
-    async def _on_generic_event(self, data):
-        log_service.add_log('info', f'📨 Evento no manejado: {data}', 'system')
-
-    async def _on_stream_online(self, data):
-        streamer = data.get("broadcaster_user_name", "Desconocido")
-        log_service.add_log('info', f'📡 Stream EN VIVO: {streamer} ha comenzado', 'system')
-
-    async def _on_stream_offline(self, data):
-        streamer = data.get("broadcaster_user_name", "Desconocido")
-        log_service.add_log('info', f'🌙 Stream OFFLINE: {streamer} se ha desconectado', 'system')
-
-    async def _on_channel_update(self, data):
-        streamer = data.get("broadcaster_user_name", "Desconocido")
-        title = data.get("title", "Sin título")
-        game = data.get("game_name", "No especificado")
-        log_service.add_log('info', f'📝 Canal actualizado: "{title}" - {game}', 'system')
-
-    async def _on_channel_follow(self, data):
-        user = data.get("user_name", "Desconocido")
-        log_service.add_log('info', f'⭐ Nuevo seguidor: {user}', 'stats')
-        if self.channel:
-            await notification_service.on_follow(self.channel, user)
-
-    async def _on_channel_subscribe(self, data):
-        user = data.get("user_name", "Desconocido")
-        tier = data.get("tier", "1000")
-        is_gift = data.get("is_gift", False)
-        if not is_gift:
-            log_service.add_log('info', f'🎉 Nueva suscripción de {user} (Tier {tier})', 'stats')
-            if self.channel:
-                await notification_service.on_subscribe(self.channel, user, tier, "sub")
-        else:
-            log_service.add_log('info', f'🎁 Suscripción regalada a {user} (Tier {tier})', 'stats')
-
-    async def _on_channel_subscription_end(self, data):
-        user = data.get("user_name", "Desconocido")
-        tier = data.get("tier", "1000")
-        log_service.add_log('info', f'❌ Suscripción terminada: {user} (Tier {tier})', 'stats')
-
-    async def _on_channel_subscription_gift(self, data):
-        user = data.get("user_name", "Alguien")
-        total = data.get("total", 1)
-        tier = data.get("tier", "1000")
-        log_service.add_log('info', f'🎁 {user} regaló {total} suscripción(es) Tier {tier}', 'stats')
-
-    async def _on_channel_subscription_message(self, data):
-        user = data.get("user_name", "Desconocido")
-        tier = data.get("tier", "1000")
-        message = data.get("message", {}).get("text", "")
-        log_service.add_log('info', f'💬 Re-suscripción de {user} (Tier {tier}) con mensaje: "{message[:50]}"', 'stats')
-
-    async def _on_channel_cheer(self, data):
-        user = data.get("user_name", "Alguien")
-        bits = data.get("bits", 0)
-        message = data.get("message", "")
-        log_service.add_log('info', f'💎 {user} envió {bits} bits - Mensaje: "{message[:30]}"', 'stats')
-
-    async def _on_channel_raid(self, data):
-        from_broadcaster = data.get("from_broadcaster_user_name", "Desconocido")
-        to_broadcaster = data.get("to_broadcaster_user_name", "Desconocido")
-        viewers = data.get("viewers", 0)
-        log_service.add_log('info', f'⚔️ Raid de {from_broadcaster} hacia {to_broadcaster} con {viewers} espectadores', 'stats')
-        if self.channel:
-            await notification_service.on_raid(self.channel, from_broadcaster, viewers)
-
-    async def _on_channel_ban(self, data):
-        user = data.get("user_name", "Desconocido")
-        moderator = data.get("moderator_user_name", "Staff")
-        reason = data.get("reason", "Sin especificar")
-        end_time = data.get("end_time")
-        is_permanent = end_time is None
-        action = "Ban permanente" if is_permanent else "Timeout"
-        log_service.add_log('info', f'🔨 {action} aplicado a {user} por {moderator} - Razón: "{reason}"', 'moderation')
-
-    async def _on_channel_unban(self, data):
-        user = data.get("user_name", "Desconocido")
-        moderator = data.get("moderator_user_name", "Staff")
-        log_service.add_log('info', f'🔓 Unban/Timeout removido a {user} por {moderator}', 'moderation')
-
-    async def _on_channel_moderator_add(self, data):
-        user = data.get("user_name", "Desconocido")
-        log_service.add_log('info', f'🛡️ Moderador añadido: {user}', 'moderation')
-
-    async def _on_channel_moderator_remove(self, data):
-        user = data.get("user_name", "Desconocido")
-        log_service.add_log('info', f'🛡️ Moderador removido: {user}', 'moderation')
-
-    async def _on_channel_shoutout_create(self, data):
-        from_user = data.get("from_broadcaster_user_name", "Desconocido")
-        to_user = data.get("to_broadcaster_user_name", "Desconocido")
-        log_service.add_log('info', f'📢 Shoutout de {from_user} para {to_user}', 'stats')
-
-    async def _on_channel_shoutout_receive(self, data):
-        from_user = data.get("from_broadcaster_user_name", "Desconocido")
-        to_user = data.get("to_broadcaster_user_name", "Desconocido")
-        log_service.add_log('info', f'📢 Shoutout recibido de {from_user} para {to_user}', 'stats')
-
-    # ============================================================
-    # OBTENER APP TOKEN (para autenticación)
-    # ============================================================
-
-    def _get_app_token(self) -> str:
-        """Obtiene el App Access Token para autenticar la creación de suscripciones."""
-        token = getattr(settings, "APP_ACCESS_TOKEN", "")
-        if token:
-            logger.debug("✅ App Access Token disponible")
-        else:
-            logger.warning("⚠️ App Access Token NO disponible")
-        return token
-
-    # ============================================================
-    # GESTIÓN DE SUSCRIPCIONES
-    # ============================================================
-
-    def _cleanup_invalid_subscriptions(self, headers: Dict):
-        """Elimina suscripciones inválidas según el estado."""
-        try:
-            r = self.session.get(
-                "https://api.twitch.tv/helix/eventsub/subscriptions",
-                headers=headers,
-                timeout=self.HTTP_TIMEOUT
-            )
-            if r.status_code != 200:
-                logger.warning(f"⚠️ No se pudieron listar suscripciones: {r.status_code}")
-                return
-
-            data = r.json()
-            total = len(data.get("data", []))
-            logger.info(f"📋 Total de suscripciones existentes: {total}")
-
-            for sub in data.get("data", []):
-                if sub.get("status") in (
-                    "authorization_revoked",
-                    "webhook_callback_verification_failed",
-                    "notification_failures_exceeded",
-                    "webhook_disconnected"
-                ):
-                    url = f"https://api.twitch.tv/helix/eventsub/subscriptions?id={sub['id']}"
-                    resp = self.session.delete(url, headers=headers, timeout=self.HTTP_TIMEOUT)
-                    if resp.status_code in (200, 204):
-                        logger.info(f"🗑️ Eliminada suscripción inválida: {sub['type']} (ID: {sub['id']})")
-                    else:
-                        logger.warning(f"No se pudo eliminar sub {sub['id']}: {resp.status_code}")
-        except Exception as e:
-            logger.error(f"Error en cleanup: {e}")
-
-    def _get_existing_subscriptions(self, headers: Dict) -> Set[Tuple[str, Tuple]]:
-        """Obtiene las suscripciones existentes y las devuelve como conjunto."""
-        try:
-            r = self.session.get(
-                "https://api.twitch.tv/helix/eventsub/subscriptions",
-                headers=headers,
-                timeout=self.HTTP_TIMEOUT
-            )
-            if r.status_code != 200:
-                logger.warning(f"⚠️ No se pudieron listar suscripciones: {r.status_code}")
-                return set()
-
-            existing = set()
-            for sub in r.json().get("data", []):
-                event_type = sub["type"]
-                condition = tuple(sorted((k, str(v)) for k, v in sub["condition"].items()))
-                existing.add((event_type, condition))
-            
-            logger.info(f"📋 Suscripciones existentes encontradas: {len(existing)}")
-            return existing
-        except Exception as e:
-            logger.error(f"Error obteniendo suscripciones: {e}")
-            return set()
-
-    def _ensure_subscription(self, app_headers: Dict, event_def: EventDefinition, existing: Set):
-        """
-        Crea una suscripción usando el App Access Token (requerido por Twitch para webhooks).
-        La condición se construye según lo que cada evento requiere.
-        """
-        # Construir la condición usando el broadcaster_id y el user_id si es necesario
-        user_id = settings.BROADCASTER_ID if event_def.requires_user else None
-        condition = event_def.condition_builder(settings.BROADCASTER_ID, user_id)
-
-        key = (event_def.type, tuple(sorted((k, str(v)) for k, v in condition.items())))
-
-        if key in existing:
-            self.stats["subscriptions_skipped"] += 1
-            logger.info(f"⏭️ {event_def.type} ya existe, omitiendo")
-            return True
-
-        logger.info(f"🔄 {event_def.type}: Creando nueva suscripción...")
-
-        # Verificar scopes del broadcaster
-        if event_def.required_scopes:
-            if not self._has_required_scopes(event_def.required_scopes, event_def.type):
-                self.stats["subscriptions_failed_scopes"] += 1
-                logger.warning(f"⚠️ {event_def.type}: Scopes faltantes, omitiendo")
-                log_service.add_log('warning', f'Omitiendo {event_def.type}: Scopes faltantes en el broadcaster', 'bot')
-                return False
-        else:
-            logger.debug(f"📌 {event_def.type}: No requiere scopes adicionales")
-
-        # Mostrar la condición que se va a usar
-        logger.info(f"📋 {event_def.type}: Condición: {json.dumps(condition)}")
-
-        try:
-            callback_url = f"{settings.EVENTSUB_CALLBACK_URL}/twitch/webhook"
-
-            payload = {
-                "type": event_def.type,
-                "version": event_def.version,
-                "condition": condition,
-                "transport": {
-                    "method": "webhook",
-                    "callback": callback_url,
-                    "secret": settings.TWITCH_WEBHOOK_SECRET
-                }
-            }
-
-            logger.info(f"📡 {event_def.type}: Enviando solicitud con App Token...")
-            logger.debug(f"   Payload: {json.dumps(payload, indent=2)}")
-
-            r = self.session.post(
-                "https://api.twitch.tv/helix/eventsub/subscriptions",
-                headers=app_headers,
-                json=payload,
-                timeout=self.HTTP_TIMEOUT
-            )
-
-            logger.info(f"📊 {event_def.type}: Respuesta HTTP {r.status_code}")
-
-            if r.status_code == 202:
-                self.stats["subscriptions_created"] += 1
-                existing.add(key)
-                logger.info(f"✅ {event_def.type}: Suscrito exitosamente con App Token")
-                log_service.add_log('info', f'Suscrito a {event_def.type} con App Token', 'bot')
-                return True
-
-            if r.status_code == 409:
-                existing.add(key)
-                self.stats["subscriptions_skipped"] += 1
-                logger.info(f"⏭️ {event_def.type}: Ya existe (409), omitiendo")
-                return True
-
-            # Errores detallados
-            error_detail = r.text
-            try:
-                error_json = r.json()
-                error_detail = error_json.get("message", r.text)
-                if "error" in error_json:
-                    error_detail = f"{error_json.get('error')}: {error_json.get('message', '')}"
-            except:
-                pass
-
-            if r.status_code == 403:
-                logger.warning(f"⚠️ {event_def.type}: 403 - {error_detail}")
-                logger.warning(f"   Condición usada: {condition}")
-                logger.warning(f"   Scopes requeridos: {event_def.required_scopes}")
-                log_service.add_log('warning', f'{event_def.type}: 403 - Error de autorización', 'bot')
-                self.stats["subscriptions_failed_scopes"] += 1
-                return False
-
-            elif r.status_code == 400:
-                logger.error(f"❌ {event_def.type}: 400 - {error_detail}")
-                logger.error(f"   Condición: {condition}")
-                log_service.add_log('error', f'{event_def.type}: 400 - {error_detail}', 'bot')
-                self.stats["subscription_errors"] += 1
-                return False
-
-            elif r.status_code == 401:
-                logger.error(f"❌ {event_def.type}: 401 - {error_detail}")
-                log_service.add_log('error', f'{event_def.type}: 401 - App Token inválido', 'bot')
-                self.stats["subscription_errors"] += 1
-                return False
-
-            elif r.status_code in (429, 500, 502, 503, 504):
-                logger.warning(f"⚠️ {event_def.type}: {r.status_code} - Error temporal")
-                log_service.add_log('warning', f'{event_def.type}: {r.status_code} - Error temporal', 'bot')
-                return False
-
-            else:
-                self.stats["subscription_errors"] += 1
-                logger.error(f"❌ {event_def.type}: Error {r.status_code} - {error_detail}")
-                log_service.add_log('error', f'Error suscribiendo a {event_def.type}: {r.status_code}', 'bot')
-                return False
-
-        except requests.exceptions.Timeout:
-            logger.error(f"❌ {event_def.type}: Timeout")
-            log_service.add_log('error', f'Timeout suscribiendo a {event_def.type}', 'bot')
-            self.stats["subscription_errors"] += 1
-            return False
-        except Exception as e:
-            self.stats["subscription_errors"] += 1
-            logger.error(f"❌ {event_def.type}: Excepción - {e}", exc_info=True)
-            log_service.add_log('error', f'Excepción suscribiendo a {event_def.type}: {e}', 'bot')
-            return False
-
-    def subscribe_to_events(self):
-        """Punto de entrada principal para crear todas las suscripciones."""
-        logger.info("=" * 60)
-        logger.info("🚀 INICIANDO SUSCRIPCIÓN A EVENTSUB")
-        logger.info("=" * 60)
-
-        # Esperar a que el webhook esté activo
-        if not self.wait_for_webhook(timeout=60):
-            logger.warning("⚠️ Webhook no disponible, pero continuando con suscripciones...")
-
-        # OBTENER APP TOKEN (para autenticación)
-        app_token = self._get_app_token()
-        if not app_token:
-            logger.error("❌ No hay APP_ACCESS_TOKEN configurado")
-            log_service.add_log('error', 'No hay APP_ACCESS_TOKEN para EventSub', 'bot')
-            return
-
-        app_headers = {
-            "Authorization": f"Bearer {app_token}",
-            "Client-Id": settings.CLIENT_ID,
-            "Content-Type": "application/json"
+        """Registra los handlers para cada tipo de evento en el dispatcher."""
+        # Mapeo de tipos de evento a handlers
+        handlers = {
+            # Stream
+            "stream.online": handle_stream_online,
+            "stream.offline": handle_stream_offline,
+            "channel.update": handle_channel_update,
+
+            # Subscriptions
+            "channel.subscribe": handle_subscribe,
+            "channel.subscription.end": handle_subscription_end,
+            "channel.subscription.gift": handle_subscription_gift,
+            "channel.subscription.message": handle_subscription_message,
+
+            # Followers
+            "channel.follow": handle_follow,
+
+            # Raids
+            "channel.raid": handle_raid,
+
+            # VIP
+            "channel.vip.add": handle_vip_add,
+            "channel.vip.remove": handle_vip_remove,
+
+            # Predictions
+            "channel.prediction.begin": handle_prediction_begin,
+            "channel.prediction.progress": handle_prediction_progress,
+            "channel.prediction.lock": handle_prediction_lock,
+            "channel.prediction.end": handle_prediction_end,
+
+            # Polls
+            "channel.poll.begin": handle_poll_begin,
+            "channel.poll.progress": handle_poll_progress,
+            "channel.poll.end": handle_poll_end,
+
+            # Rewards
+            "channel.channel_points_custom_reward_redemption.add": handle_reward_redemption_add,
+            "channel.channel_points_custom_reward_redemption.update": handle_reward_redemption_update,
+
+            # Goals
+            "channel.goal.begin": handle_goal_begin,
+            "channel.goal.progress": handle_goal_progress,
+            "channel.goal.end": handle_goal_end,
+
+            # Hype Train
+            "channel.hype_train.begin": handle_hype_train_begin,
+            "channel.hype_train.progress": handle_hype_train_progress,
+            "channel.hype_train.end": handle_hype_train_end,
+
+            # Shoutouts
+            "channel.shoutout.create": handle_shoutout_create,
+            "channel.shoutout.receive": handle_shoutout_receive,
+
+            # Automod
+            "automod.message.hold": handle_automod_hold,
+            "automod.message.update": handle_automod_update,
+
+            # Chat
+            "channel.chat.message_delete": handle_chat_message_delete,
+            "channel.chat.clear": handle_chat_clear,
+            "channel.chat.clear_user_messages": handle_chat_clear_user_messages,
+
+            # Moderation (adicionales) - BAN y UNBAN ELIMINADOS
+            "channel.moderator.add": handle_vip_add,  # Similar a VIP
+            "channel.moderator.remove": handle_vip_remove,
+            "channel.shield_mode.begin": handle_shield_mode,
+            "channel.shield_mode.end": handle_shield_mode,
+            "channel.suspicious_user.message": handle_suspicious_user,
+            "channel.suspicious_user.update": handle_suspicious_user,
         }
 
-        # VERIFICAR SCOPES DEL BROADCASTER
-        logger.info("🔍 Verificando scopes del broadcaster...")
-        broadcaster_scopes = self._get_broadcaster_scopes()
-        if not broadcaster_scopes:
-            logger.warning("⚠️ No se pudieron obtener los scopes del broadcaster")
-        else:
-            logger.info(f"✅ Scopes del broadcaster: {len(broadcaster_scopes)}")
-            critical = ["moderator:manage:banned_users", "moderator:manage:chat_messages", "moderator:read:followers"]
-            for scope in critical:
-                if scope in broadcaster_scopes:
-                    logger.info(f"   ✅ {scope}")
-                else:
-                    logger.warning(f"   ❌ {scope}")
+        # Registrar cada handler
+        for event_type, handler in handlers.items():
+            self._dispatcher.register(event_type, handler)
 
-        # LIMPIAR Y LISTAR SUSCRIPCIONES EXISTENTES
-        self._cleanup_invalid_subscriptions(app_headers)
-        existing = self._get_existing_subscriptions(app_headers)
+        # Handler genérico para eventos no registrados
+        self._dispatcher.register("generic", handle_generic_event)
 
-        logger.info(f"📌 Broadcaster ID: {settings.BROADCASTER_ID}")
-        logger.info(f"📡 Total de eventos: {len(EVENTS)}")
+        logger.info(f"Registrados {len(handlers)} handlers para EventSub")
 
-        successful = 0
-        failed = 0
+    def process_webhook(self, message_id: str, event_type: str, event_data: dict) -> None:
+        """
+        Procesa un webhook entrante.
+        """
+        # 1. Deduplicar
+        if self._deduplicator.is_duplicate(message_id):
+            self._stats.increment("events_duplicated")
+            return
 
-        # CREAR SUSCRIPCIONES (TODAS CON APP TOKEN)
-        logger.info("\n" + "-" * 40)
-        logger.info("📡 SUSCRIBIENDO EVENTOS CON APP TOKEN")
-        logger.info("-" * 40)
+        # 2. Despachar al handler correspondiente
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._safe_dispatch(event_type, event_data, message_id))
+        except RuntimeError:
+            # Si no hay loop, crear uno temporal
+            asyncio.run(self._safe_dispatch(event_type, event_data, message_id))
 
-        for event_def in EVENTS:
-            result = self._ensure_subscription(app_headers, event_def, existing)
-            if result:
-                successful += 1
-            else:
-                failed += 1
-            time.sleep(0.3)
+    async def _safe_dispatch(self, event_type: str, event_data: dict, message_id: str):
+        """Ejecuta el dispatch de forma segura."""
+        try:
+            await self._dispatcher.dispatch(event_type, event_data, message_id)
+        except Exception as e:
+            logger.error(f"Error en dispatch de {event_type}: {e}", exc_info=True)
+            self._stats.increment("subscription_errors")
 
-        # RESUMEN FINAL
-        logger.info("\n" + "=" * 60)
-        logger.info("📊 RESUMEN FINAL DE SUSCRIPCIONES")
-        logger.info("=" * 60)
-        logger.info(f"✅ Creadas exitosamente: {successful}")
-        logger.info(f"❌ Fallidas: {failed}")
-        logger.info(f"⏭️ Omitidas (ya existentes): {len(existing)}")
-        logger.info(f"📊 Total eventos procesados: {len(EVENTS)}")
-
-        if failed > 0:
-            logger.warning(f"⚠️ {failed} eventos fallaron. Revisa los logs anteriores.")
-            logger.warning("   Posibles causas:")
-            logger.warning("   - Scopes faltantes en el broadcaster")
-            logger.warning("   - Condición incorrecta para el evento")
-            logger.warning("   - App Token inválido o expirado")
-        else:
-            logger.info("✅ ¡Todas las suscripciones se completaron exitosamente!")
-
-        log_service.add_log('info', f'EventSub: {successful} creadas, {failed} fallidas, {len(existing)} existentes', 'bot')
+    def subscribe_to_events(self):
+        """Inicia las suscripciones."""
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._manager.start())
+        except RuntimeError:
+            asyncio.run(self._manager.start())
 
     def stop(self):
-        self.session.close()
-        logger.info("🛑 EventSub detenido")
-        log_service.add_log('info', 'EventSub detenido', 'bot')
+        """Detiene el sistema."""
+        self._manager.stop()
+
+    def get_statistics(self) -> dict:
+        """Devuelve estadísticas del sistema."""
+        return self._stats.get().to_dict()
+
+    def get_recent_metrics(self, limit: int = 100) -> list:
+        """Devuelve métricas recientes."""
+        return self._metrics.get_recent(limit)
+
+    def get_event_bus(self):
+        """Devuelve el event bus para suscripciones externas."""
+        return self._event_bus
 
 
-# Instancia global
+# Instancia global (compatibilidad con código existente)
 eventsub_service = EventSubService()

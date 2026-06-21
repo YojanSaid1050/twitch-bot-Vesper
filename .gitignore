@@ -76,3 +76,6 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Scripts de pruebas (carpeta para scripts temporales o de prueba)
+SCRIPTS_DE_PRUEBAS/

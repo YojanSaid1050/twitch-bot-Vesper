@@ -1,7 +1,8 @@
 # services/token_manager.py
 """
 Gestor de refresh de tokens de Twitch y Spotify (refactorizado con PostgreSQL)
-- FORZADO: el token de moderador siempre se sincroniza con el broadcaster.
+- FORZADO: el token de moderador siempre se sincroniza con el BOT.
+- El App Token NO se refresca automáticamente (solo bajo demanda).
 """
 
 import threading
@@ -49,12 +50,16 @@ class TokenManager:
         self.client_secret = settings.CLIENT_SECRET
 
         # Estados de tokens (cada uno con su lock)
+        # El token de MODERATOR es una referencia al token del BOT
+        bot_state = TokenState(
+            TokenType.BOT,
+            settings.BOT_REFRESH_TOKEN,
+            settings.BOT_TOKEN
+        )
+
         self.states = {
-            TokenType.BOT: TokenState(
-                TokenType.BOT,
-                settings.BOT_REFRESH_TOKEN,
-                settings.BOT_TOKEN
-            ),
+            TokenType.BOT: bot_state,
+            TokenType.MODERATOR: bot_state,  # ← COMPARTE EL MISMO ESTADO QUE EL BOT
             TokenType.BROADCASTER: TokenState(
                 TokenType.BROADCASTER,
                 settings.BROADCASTER_REFRESH_TOKEN,
@@ -103,12 +108,32 @@ class TokenManager:
 
     def get_spotify_token(self) -> Optional[str]:
         """Devuelve el access token de Spotify, refrescando si es necesario."""
-        state = self.states[TokenType.SPOTIFY]
+        return self._get_token(TokenType.SPOTIFY)
+
+    def get_app_token(self) -> Optional[str]:
+        """
+        Devuelve el App Access Token, refrescándolo si es necesario.
+        Este método debe usarse para obtener el token antes de cualquier llamada a la API de EventSub.
+        """
+        return self._get_token(TokenType.APP)
+
+    def get_moderator_token(self) -> Optional[str]:
+        """
+        Devuelve el token de moderador (que es el mismo que el del bot).
+        """
+        return self._get_token(TokenType.MODERATOR)
+
+    def _get_token(self, token_type: TokenType) -> Optional[str]:
+        """Obtiene un token, refrescándolo si ha expirado o es inválido."""
+        state = self.states[token_type]
         with state.lock:
-            if not state.valid or state.is_expired():
-                if not self._refresh_token(TokenType.SPOTIFY):
-                    return None
-            return state.access_token
+            # Si es válido y no expirará pronto, devolverlo
+            if state.valid and not state.is_expired():
+                return state.access_token
+            # Si no, refrescar
+            if self._refresh_token(token_type):
+                return state.access_token
+            return None
 
     def are_tokens_valid(self) -> bool:
         """Verifica si los tokens esenciales (bot y broadcaster) son válidos."""
@@ -216,7 +241,7 @@ class TokenManager:
         """Refresca un token específico, usando su propio lock."""
         state = self.states[token_type]
 
-        # Si es App Token, no tiene refresh; lo obtenemos con client_credentials
+        # Si es App Token, usamos el método específico
         if token_type == TokenType.APP:
             return self._refresh_app_token_internal(state)
 
@@ -224,7 +249,7 @@ class TokenManager:
         if token_type == TokenType.SPOTIFY:
             return self._refresh_spotify_token_internal(state)
 
-        # Twitch: bot o broadcaster
+        # Twitch: bot, broadcaster o moderator (moderator comparte estado con bot)
         with state.lock:
             # Si ya es válido y no expirará pronto, no hacer nada
             if state.valid and not state.is_expired():
@@ -245,7 +270,7 @@ class TokenManager:
 
                 # Guardar refresh token en PostgreSQL si cambió
                 if new_refresh and new_refresh != state.refresh_token:
-                    if token_type == TokenType.BOT:
+                    if token_type == TokenType.BOT or token_type == TokenType.MODERATOR:
                         settings.update_bot_refresh_token(new_refresh)
                     elif token_type == TokenType.BROADCASTER:
                         settings.update_broadcaster_refresh_token(new_refresh)
@@ -273,6 +298,10 @@ class TokenManager:
     def _refresh_app_token_internal(self, state: TokenState) -> bool:
         """Obtiene nuevo App Access Token."""
         with state.lock:
+            # Si ya es válido y no expirará pronto, no hacer nada
+            if state.valid and not state.is_expired():
+                return True
+
             try:
                 token_data = OAuthManager.get_app_token(
                     client_id=self.client_id,
@@ -293,6 +322,10 @@ class TokenManager:
     def _refresh_spotify_token_internal(self, state: TokenState) -> bool:
         """Refresca token de Spotify y lo guarda en PostgreSQL."""
         with state.lock:
+            # Si ya es válido y no expirará pronto, no hacer nada
+            if state.valid and not state.is_expired():
+                return True
+
             try:
                 token_data = OAuthManager.refresh_spotify_token(
                     client_id=settings.SPOTIFY_CLIENT_ID,
@@ -334,7 +367,7 @@ class TokenManager:
         Actualiza el objeto settings y la base de datos.
         NOTA: para BROADCASTER, settings.update_broadcaster_token ya sincroniza moderador.
         """
-        if token_type == TokenType.BOT:
+        if token_type == TokenType.BOT or token_type == TokenType.MODERATOR:
             settings.update_bot_token(new_token, expires_in)
         elif token_type == TokenType.BROADCASTER:
             settings.update_broadcaster_token(new_token, expires_in)
@@ -342,11 +375,13 @@ class TokenManager:
             settings.update_app_token(new_token, expires_in)
 
     # ============================================
-    # Scheduler inteligente
+    # Scheduler inteligente (EXCLUYE APP TOKEN)
     # ============================================
 
     def _schedule_next_refresh(self):
-        """Calcula el próximo token que expirará y programa su refresh."""
+        """Calcula el próximo token que expirará y programa su refresh.
+        El App Token NO se incluye en el refresco automático.
+        """
         if self._shutdown_event.is_set():
             return
 
@@ -354,7 +389,12 @@ class TokenManager:
         earliest = None
         earliest_type = None
 
+        # Solo consideramos BOT, BROADCASTER y SPOTIFY para refresco automático
+        # MODERATOR comparte estado con BOT, así que no es necesario considerarlo aparte
+        auto_refresh_types = {TokenType.BOT, TokenType.BROADCASTER, TokenType.SPOTIFY}
         for token_type, state in self.states.items():
+            if token_type not in auto_refresh_types:
+                continue
             if state.expires_at and state.valid:
                 time_left = state.expires_at - now - 60  # margen 1 minuto
                 if time_left > 0 and (earliest is None or time_left < earliest):
@@ -392,7 +432,10 @@ class TokenManager:
         earliest = None
         earliest_type = None
 
+        auto_refresh_types = {TokenType.BOT, TokenType.BROADCASTER, TokenType.SPOTIFY}
         for token_type, state in self.states.items():
+            if token_type not in auto_refresh_types:
+                continue
             if state.expires_at and state.valid:
                 time_left = state.expires_at - now
                 if time_left < 300:  # menos de 5 minutos
@@ -413,6 +456,6 @@ class TokenManager:
 
 
 # ============================================
-# INSTANCIA GLOBAL (NECESARIA PARA IMPORTACIÓN)
+# INSTANCIA GLOBAL
 # ============================================
 token_manager = TokenManager()

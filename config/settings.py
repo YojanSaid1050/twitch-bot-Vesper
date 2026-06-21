@@ -2,6 +2,8 @@
 import os
 import sys
 import codecs
+import json
+import psycopg2
 from pathlib import Path
 from dotenv import load_dotenv
 from config.env_manager import env_manager
@@ -17,6 +19,7 @@ if sys.stderr.encoding != 'UTF-8':
 load_dotenv()
 logger = get_logger(__name__)
 
+
 class Settings:
     _instance = None
     _initialized = False
@@ -30,6 +33,7 @@ class Settings:
         if self._initialized:
             return
         self._load_static_config()
+        self._load_ids_from_db()  # ← NUEVO: carga IDs desde PostgreSQL
         self._load_tokens()
         self._initialized = True
         self._validate()
@@ -37,6 +41,7 @@ class Settings:
             logger.warning("⚠️ DATABASE_URL no configurada. Los tokens no se persistirán correctamente.")
 
     def _load_static_config(self):
+        """Carga variables estáticas desde .env (fallback)."""
         self.CLIENT_ID = os.environ.get("CLIENT_ID", "")
         self.CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "")
         self.CHANNEL = os.environ.get("CHANNEL", "")
@@ -50,27 +55,52 @@ class Settings:
         self.BOT_WEBHOOK_PORT = int(os.environ.get("BOT_WEBHOOK_PORT", "5001"))
         self.BOT_WEBHOOK_URL = os.environ.get("BOT_WEBHOOK_URL", "http://localhost:5001/webhook")
         self.DASHBOARD_SECRET_KEY = os.environ.get("DASHBOARD_SECRET_KEY", "supersecretkey_change_me")
-        self.MODERATOR_USER_ID = os.environ.get("MODERATOR_USER_ID", self.BROADCASTER_ID)
 
-        # Fallback a .env si faltan variables
-        if not self.CLIENT_ID or not self.CLIENT_SECRET:
-            env_vars = env_manager.reload()
-            if not self.CLIENT_ID:
-                self.CLIENT_ID = env_vars.get("CLIENT_ID", "")
-            if not self.CLIENT_SECRET:
-                self.CLIENT_SECRET = env_vars.get("CLIENT_SECRET", "")
-            if not self.CHANNEL:
-                self.CHANNEL = env_vars.get("CHANNEL", "")
-            if not self.BOT_NICK:
-                self.BOT_NICK = env_vars.get("BOT_NICK", "")
-            if not self.BOT_ID:
-                self.BOT_ID = env_vars.get("BOT_ID", "")
-            if not self.BROADCASTER_ID:
-                self.BROADCASTER_ID = env_vars.get("BROADCASTER_ID", "")
-            if not self.MODERATOR_USER_ID:
-                self.MODERATOR_USER_ID = env_vars.get("MODERATOR_USER_ID", self.BROADCASTER_ID)
+        # MODERATOR_USER_ID: por defecto BOT_ID
+        self.MODERATOR_USER_ID = os.environ.get("MODERATOR_USER_ID", self.BOT_ID)
+
+    def _load_ids_from_db(self):
+        """
+        Carga los IDs desde la tabla bot_config de PostgreSQL,
+        sobrescribiendo los valores del .env si existen.
+        """
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            return
+
+        try:
+            conn = psycopg2.connect(db_url)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT config_key, config_value FROM bot_config
+                WHERE config_key IN ('broadcaster_id', 'bot_id', 'moderator_user_id')
+            """)
+            rows = cursor.fetchall()
+            cursor.close()
+            conn.close()
+
+            for key, value_json in rows:
+                value = json.loads(value_json) if isinstance(value_json, str) else value_json
+                if key == 'broadcaster_id' and value:
+                    self.BROADCASTER_ID = str(value)
+                    logger.info(f"✅ Cargado BROADCASTER_ID = {self.BROADCASTER_ID} desde PostgreSQL")
+                elif key == 'bot_id' and value:
+                    self.BOT_ID = str(value)
+                    logger.info(f"✅ Cargado BOT_ID = {self.BOT_ID} desde PostgreSQL")
+                elif key == 'moderator_user_id' and value:
+                    self.MODERATOR_USER_ID = str(value)
+                    logger.info(f"✅ Cargado MODERATOR_USER_ID = {self.MODERATOR_USER_ID} desde PostgreSQL")
+
+            # Si MODERATOR_USER_ID no se encontró, usar BOT_ID (que ya se cargó)
+            if not getattr(self, "MODERATOR_USER_ID", "") and self.BOT_ID:
+                self.MODERATOR_USER_ID = self.BOT_ID
+                logger.info(f"🔁 MODERATOR_USER_ID = BOT_ID ({self.BOT_ID}) (por defecto)")
+
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudieron cargar IDs desde PostgreSQL: {e}")
 
     def _load_tokens(self):
+        """Carga tokens desde PostgreSQL. Si no existen, los migra desde .env."""
         token_mapping = {
             ("twitch", "bot"): ("BOT_TOKEN", "BOT_REFRESH_TOKEN"),
             ("twitch", "broadcaster"): ("BROADCASTER_TOKEN", "BROADCASTER_REFRESH_TOKEN"),
@@ -104,15 +134,11 @@ class Settings:
                     if refresh_attr:
                         setattr(self, refresh_attr, "")
 
-        # Si MODERATOR_USER_ID no está configurado, usar BROADCASTER_ID
-        if not getattr(self, "MODERATOR_USER_ID", ""):
-            self.MODERATOR_USER_ID = self.BROADCASTER_ID
-
-        # NO sincronizar tokens aquí. Lo hará TokenManager después del refresh.
-        logger.info("🔁 La sincronización de MODERATOR con BROADCASTER se hará en TokenManager.")
+        logger.info("🔁 El token de MODERATOR se sincronizará con el BOT al actualizar el BOT_TOKEN.")
 
     def reload(self):
         self._load_static_config()
+        self._load_ids_from_db()
         self._load_tokens()
         self._validate()
         logger.info("🔄 Configuración recargada")
@@ -134,25 +160,25 @@ class Settings:
         }
 
     # ============================================================
-    # MÉTODOS DE ACTUALIZACIÓN (SIN SINCRONIZACIÓN DE MODERADOR)
+    # MÉTODOS DE ACTUALIZACIÓN
     # ============================================================
+
     def update_bot_token(self, new_token: str, expires_in: int):
         self.BOT_TOKEN = new_token
         TokenRepository.update_access_token("twitch", "bot", new_token, expires_in)
         logger.info(f"✅ Token BOT actualizado (expira en {expires_in//60}m)")
+        # Sincronizar moderador con el bot
+        self._sync_moderator_token(new_token, expires_in)
+
+    def _sync_moderator_token(self, new_token: str, expires_in: int):
+        self.MODERATOR_ACCESS_TOKEN = new_token
+        TokenRepository.update_access_token("twitch", "moderator", new_token, expires_in)
+        logger.info(f"✅ Token MODERATOR sincronizado con BOT (expira en {expires_in//60}m)")
 
     def update_broadcaster_token(self, new_token: str, expires_in: int):
         self.BROADCASTER_TOKEN = new_token
         TokenRepository.update_access_token("twitch", "broadcaster", new_token, expires_in)
         logger.info(f"✅ Token BROADCASTER actualizado (expira en {expires_in//60}m)")
-        # AHORA SÍ, sincronizar moderador con el nuevo token
-        self._sync_moderator_token(new_token, expires_in)
-
-    def _sync_moderator_token(self, new_token: str, expires_in: int):
-        """Sincroniza el token de moderador con el de broadcaster."""
-        self.MODERATOR_ACCESS_TOKEN = new_token
-        TokenRepository.update_access_token("twitch", "moderator", new_token, expires_in)
-        logger.info(f"✅ Token MODERATOR sincronizado con BROADCASTER (expira en {expires_in//60}m)")
 
     def update_app_token(self, new_token: str, expires_in: int = 5184000):
         self.APP_ACCESS_TOKEN = new_token
@@ -163,18 +189,17 @@ class Settings:
         self.BOT_REFRESH_TOKEN = new_refresh
         TokenRepository.update_refresh_token("twitch", "bot", new_refresh)
         logger.info("✅ Refresh token BOT actualizado")
-
-    def update_broadcaster_refresh_token(self, new_refresh: str):
-        self.BROADCASTER_REFRESH_TOKEN = new_refresh
-        TokenRepository.update_refresh_token("twitch", "broadcaster", new_refresh)
-        logger.info("✅ Refresh token BROADCASTER actualizado")
-        # Sincronizar también el refresh de moderador
         self._sync_moderator_refresh_token(new_refresh)
 
     def _sync_moderator_refresh_token(self, new_refresh: str):
         self.MODERATOR_REFRESH_TOKEN = new_refresh
         TokenRepository.update_refresh_token("twitch", "moderator", new_refresh)
-        logger.info("✅ Refresh token MODERATOR sincronizado con BROADCASTER")
+        logger.info("✅ Refresh token MODERATOR sincronizado con BOT")
+
+    def update_broadcaster_refresh_token(self, new_refresh: str):
+        self.BROADCASTER_REFRESH_TOKEN = new_refresh
+        TokenRepository.update_refresh_token("twitch", "broadcaster", new_refresh)
+        logger.info("✅ Refresh token BROADCASTER actualizado")
 
     def update_spotify_refresh_token(self, new_refresh: str):
         self.SPOTIFY_REFRESH_TOKEN = new_refresh
@@ -199,5 +224,6 @@ class Settings:
             logger.warning("⚠️ BROADCASTER_REFRESH_TOKEN no configurado en base de datos.")
         if not self.SPOTIFY_REFRESH_TOKEN:
             logger.warning("⚠️ SPOTIFY_REFRESH_TOKEN no configurado en base de datos.")
+
 
 settings = Settings()
