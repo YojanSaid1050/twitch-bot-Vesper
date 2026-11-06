@@ -9,6 +9,7 @@ from .custom import setup_custom_commands
 from .social import setup_social_commands
 from .spotify_controls import setup_spotify_controls
 from .clips import setup_clip_commands
+from .extras import setup_extra_commands
 
 try:
     from .spotify import setup_spotify_commands
@@ -30,6 +31,7 @@ def register_commands(bot):
     setup_social_commands(bot)
     setup_spotify_controls(bot)
     setup_clip_commands(bot)
+    setup_extra_commands(bot)
 
     if SPOTIFY_AVAILABLE:
         setup_spotify_commands(bot)

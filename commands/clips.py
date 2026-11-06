@@ -14,6 +14,17 @@ def setup_clip_commands(bot):
     @bot.command(name="clip", aliases=["clipnow", "crearclip"])
     async def create_clip(ctx: commands.Context):
         """Crear un clip del momento actual (todos pueden usar)"""
+        from bot.permissions import permission_checker
+        from utils.cooldowns import cooldowns
+
+        # Twitch limita la creación de clips: sin cooldown cualquiera podía
+        # spamear !clip y agotar el límite del canal.
+        if not permission_checker.is_staff(ctx.message):
+            left = cooldowns.remaining("clip", global_seconds=30, user_id=str(ctx.author.id), user_seconds=120)
+            if left > 0:
+                return  # silencioso: responder a cada intento también sería spam
+        cooldowns.trigger("clip", str(ctx.author.id))
+
         stream_info = await stats_service.get_stream_info()
         
         if not stream_info:

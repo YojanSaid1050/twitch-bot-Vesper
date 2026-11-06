@@ -33,3 +33,29 @@ def truncate_message(message: str, max_length: int = 450) -> str:
     if len(message) <= max_length:
         return message
     return message[:max_length - 3] + "..."
+
+def format_duration_long(total_seconds: float) -> str:
+    """
+    Formatea una duración larga en español: "2 años, 3 meses y 5 días".
+    Muestra como máximo tres unidades (años/meses/días u horas/minutos).
+    """
+    seconds = int(max(0, total_seconds))
+    units = [
+        ("año", "años", 365 * 86400),
+        ("mes", "meses", 30 * 86400),
+        ("día", "días", 86400),
+        ("hora", "horas", 3600),
+        ("minuto", "minutos", 60),
+    ]
+    parts = []
+    for singular, plural, size in units:
+        value, seconds = divmod(seconds, size)
+        if value:
+            parts.append(f"{value} {singular if value == 1 else plural}")
+        if len(parts) == 3:
+            break
+    if not parts:
+        return "menos de un minuto"
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " y " + parts[-1]

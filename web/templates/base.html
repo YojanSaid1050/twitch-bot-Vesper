@@ -58,6 +58,18 @@
                             <span>Comandos</span>
                         </a>
                     </li>
+                    <li class="nav-item {% if active_page == 'timers' %}active{% endif %}">
+                        <a href="/timers">
+                            <i class="fas fa-stopwatch"></i>
+                            <span>Timers</span>
+                        </a>
+                    </li>
+                    <li class="nav-item {% if active_page == 'quotes' %}active{% endif %}">
+                        <a href="/quotes">
+                            <i class="fas fa-quote-left"></i>
+                            <span>Citas</span>
+                        </a>
+                    </li>
                     <li class="nav-item {% if active_page == 'spotify' %}active{% endif %}">
                         <a href="/spotify">
                             <i class="fas fa-music"></i>
@@ -80,6 +92,12 @@
                         <a href="/logs">
                             <i class="fas fa-list-ul"></i>
                             <span>Logs</span>
+                        </a>
+                    </li>
+                    <li class="nav-item {% if active_page == 'connections' %}active{% endif %}">
+                        <a href="/connections">
+                            <i class="fas fa-key"></i>
+                            <span>Conexiones</span>
                         </a>
                     </li>
                     <li class="nav-item {% if active_page == 'settings' %}active{% endif %}">

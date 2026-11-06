@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}VesperBot — Citas{% endblock %}
+{% block header %}Citas{% endblock %}
+
+{% block content %}
+
+<div class="dashboard-grid single-col">
+
+    <!-- ========== AÑADIR CITA ========== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <i class="fas fa-quote-left"></i>
+                <h3>Nueva cita</h3>
+            </div>
+        </div>
+        <div class="card-body">
+            <form id="quote-form" class="quote-form">
+                <div class="form-group quote-text-group">
+                    <label for="quote-text"><i class="fas fa-comment"></i> Texto</label>
+                    <textarea id="quote-text" class="form-control" rows="2" maxlength="400"
+                              placeholder="Lo que dijo el streamer…" required></textarea>
+                    <span class="char-count"><span id="quote-chars">0</span>/400</span>
+                </div>
+                <div class="form-group">
+                    <label for="quote-game"><i class="fas fa-gamepad"></i> Juego (opcional)</label>
+                    <input type="text" id="quote-game" class="form-control" maxlength="100" placeholder="ej: Hollow Knight">
+                </div>
+                <button type="submit" class="btn-primary" id="quote-submit">
+                    <i class="fas fa-plus"></i> Guardar cita
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ========== LISTA ========== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <i class="fas fa-book"></i>
+                <h3>Libro de citas</h3>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <input type="search" id="quote-search" class="form-control quote-search" placeholder="Buscar…">
+                <span class="badge" id="quote-count">0</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="quotes-list" class="quotes-list">
+                <p class="text-muted text-center" style="padding: 24px;">Cargando…</p>
+            </div>
+            <p class="text-muted page-hint" style="margin-top: 12px;">
+                En el chat: <code>!quote</code> muestra una al azar, <code>!quote 5</code> la número 5,
+                y el staff puede usar <code>!quote add &lt;texto&gt;</code> y <code>!quote del &lt;número&gt;</code>.
+            </p>
+        </div>
+    </div>
+</div>
+
+<style>
+    .dashboard-grid.single-col { grid-template-columns: 1fr; }
+    .page-hint { font-size: 13px; margin: 0; line-height: 1.5; }
+    .quote-form { display: grid; grid-template-columns: 2fr 1fr auto; gap: 16px; align-items: end; }
+    .quote-form .form-group { margin: 0; }
+    .quote-text-group { position: relative; }
+    .quote-text-group textarea { resize: vertical; min-height: 44px; font-family: inherit; }
+    .char-count { position: absolute; right: 10px; bottom: 8px; font-size: 11px; color: var(--text-muted); }
+    .quote-search { width: 180px; padding: 6px 10px; font-size: 13px; }
+    .quotes-list { display: flex; flex-direction: column; gap: 10px; }
+    .quote-item {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 14px;
+        align-items: start;
+        padding: 14px 16px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-input);
+        border: 1px solid var(--border, rgba(255,255,255,0.06));
+    }
+    .quote-id { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; min-width: 34px; }
+    .quote-body { min-width: 0; }
+    .quote-text { margin: 0 0 6px; color: var(--text-primary, inherit); line-height: 1.5; word-break: break-word; }
+    .quote-meta { font-size: 12px; color: var(--text-muted); }
+    .quote-edit textarea { width: 100%; resize: vertical; font-family: inherit; margin-bottom: 8px; }
+    .quote-edit .edit-actions { display: flex; gap: 8px; }
+    .row-actions { display: flex; gap: 6px; }
+    @media (max-width: 768px) {
+        .quote-form { grid-template-columns: 1fr; }
+        .quote-search { width: 120px; }
+        .quote-item { grid-template-columns: 1fr; gap: 6px; }
+        .row-actions { justify-content: flex-end; }
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let quotesCache = [];
+
+    function quoteMeta(q) {
+        const parts = [];
+        if (q.game) parts.push(`<i class="fas fa-gamepad"></i> ${escapeHtml(q.game)}`);
+        if (q.date) parts.push(`<i class="fas fa-calendar"></i> ${escapeHtml(q.date)}`);
+        if (q.added_by) parts.push(`<i class="fas fa-user"></i> ${escapeHtml(q.added_by)}`);
+        return parts.join(' &nbsp;·&nbsp; ');
+    }
+
+    function renderQuotes() {
+        const term = document.getElementById('quote-search').value.trim().toLowerCase();
+        const list = document.getElementById('quotes-list');
+        const shown = term
+            ? quotesCache.filter(q => `${q.id} ${q.text} ${q.game || ''} ${q.added_by || ''}`.toLowerCase().includes(term))
+            : quotesCache;
+        document.getElementById('quote-count').textContent = quotesCache.length;
+
+        if (!quotesCache.length) {
+            list.innerHTML = `<p class="text-muted text-center" style="padding: 24px;">
+                <i class="fas fa-inbox" style="font-size: 24px; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
+                Aún no hay citas guardadas.</p>`;
+            return;
+        }
+        if (!shown.length) {
+            list.innerHTML = '<p class="text-muted text-center" style="padding: 24px;">Ninguna cita coincide con la búsqueda.</p>';
+            return;
+        }
+
+        list.innerHTML = shown.map(q => `
+            <div class="quote-item" id="quote-${q.id}">
+                <span class="quote-id">#${q.id}</span>
+                <div class="quote-body">
+                    <p class="quote-text">“${escapeHtml(q.text)}”</p>
+                    <div class="quote-meta">${quoteMeta(q)}</div>
+                </div>
+                <div class="row-actions">
+                    <button class="btn-icon btn-sm" onclick="startEdit(${q.id})" title="Editar"><i class="fas fa-pen"></i></button>
+                    <button class="btn-danger btn-sm" onclick="deleteQuote(${q.id})" title="Eliminar"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>`).join('');
+    }
+
+    function loadQuotes() {
+        fetch('/api/quotes')
+            .then(res => { if (!res.ok) throw new Error(); return res.json(); })
+            .then(data => { quotesCache = data; renderQuotes(); })
+            .catch(() => {
+                document.getElementById('quotes-list').innerHTML =
+                    '<p class="text-center" style="color: var(--danger); padding: 24px;">Error al cargar las citas</p>';
+            });
+    }
+
+    function startEdit(id) {
+        const q = quotesCache.find(x => x.id === id);
+        if (!q) return;
+        const body = document.querySelector(`#quote-${id} .quote-body`);
+        body.innerHTML = `
+            <div class="quote-edit">
+                <textarea class="form-control" rows="2" maxlength="400" id="edit-text-${id}"></textarea>
+                <input type="text" class="form-control" maxlength="100" id="edit-game-${id}" placeholder="Juego (opcional)" style="margin-bottom: 8px;">
+                <div class="edit-actions">
+                    <button class="btn-primary btn-sm" onclick="saveEdit(${id})"><i class="fas fa-save"></i> Guardar</button>
+                    <button class="btn-secondary btn-sm" onclick="renderQuotes()">Cancelar</button>
+                </div>
+            </div>`;
+        // Se asigna con .value para no interpretar el texto como HTML
+        document.getElementById(`edit-text-${id}`).value = q.text;
+        document.getElementById(`edit-game-${id}`).value = q.game || '';
+        document.getElementById(`edit-text-${id}`).focus();
+    }
+
+    function saveEdit(id) {
+        const text = document.getElementById(`edit-text-${id}`).value.trim();
+        const game = document.getElementById(`edit-game-${id}`).value.trim();
+        fetch(`/api/quotes/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, game })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) { showToast(data.error, 'error'); return; }
+                showToast(data.message, 'success');
+                loadQuotes();
+            })
+            .catch(() => showToast('Error al guardar la cita', 'error'));
+    }
+
+    async function deleteQuote(id) {
+        const ok = await showModal('⚠️ Eliminar cita', `¿Eliminar la cita <strong>#${id}</strong>?`, 'Eliminar', 'Cancelar', 'danger');
+        if (!ok) return;
+        fetch(`/api/quotes/${id}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) { showToast(data.error, 'error'); return; }
+                showToast(data.message, 'success');
+                loadQuotes();
+            })
+            .catch(() => showToast('Error al eliminar la cita', 'error'));
+    }
+
+    document.getElementById('quote-text').addEventListener('input', e => {
+        document.getElementById('quote-chars').textContent = e.target.value.length;
+    });
+    document.getElementById('quote-search').addEventListener('input', renderQuotes);
+
+    document.getElementById('quote-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        const text = document.getElementById('quote-text').value.trim();
+        const game = document.getElementById('quote-game').value.trim();
+        const btn = document.getElementById('quote-submit');
+        btn.disabled = true;
+        fetch('/api/quotes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, game })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) { showToast(data.error, 'error'); return; }
+                showToast(data.message, 'success');
+                this.reset();
+                document.getElementById('quote-chars').textContent = '0';
+                loadQuotes();
+            })
+            .catch(() => showToast('Error al guardar la cita', 'error'))
+            .finally(() => { btn.disabled = false; });
+    });
+
+    document.addEventListener('DOMContentLoaded', loadQuotes);
+</script>
+{% endblock %}

@@ -26,7 +26,10 @@ class TokenState:
         self.refresh_token = refresh_token
         self.access_token = access_token
         self.expires_at: Optional[float] = None  # timestamp
-        self.lock = threading.Lock()
+        # RLock: _get_token() y wait_for_valid_tokens() adquieren el lock y luego
+        # llaman a _refresh_token(), que vuelve a adquirirlo. Con Lock normal
+        # eso bloqueaba el hilo para siempre.
+        self.lock = threading.RLock()
         self.valid = False
 
     def is_expired(self) -> bool:
@@ -80,31 +83,52 @@ class TokenManager:
         self._refresh_timer: Optional[threading.Timer] = None
         self._shutdown_event = threading.Event()
 
+        self._listeners = []
+
+        # Cooldown para refrescos forzados desde fuera (dashboard)
+        self._last_forced_refresh = 0.0
+        self._forced_refresh_cooldown = 120
+
     # ============================================
     # Métodos públicos (compatibilidad)
     # ============================================
 
+    # Los métodos públicos se llaman cuando Twitch acaba de responder 401, así que
+    # fuerzan el refresco aunque el estado local crea que el token sigue vigente
+    # (p. ej. si fue revocado). Sin esto, el refresco no hacía nada y el reintento
+    # volvía a fallar con el mismo token.
     def refresh_bot_token(self) -> bool:
-        return self._refresh_token(TokenType.BOT)
+        return self._refresh_token(TokenType.BOT, force=True)
 
     def refresh_broadcaster_token(self) -> bool:
-        return self._refresh_token(TokenType.BROADCASTER)
+        return self._refresh_token(TokenType.BROADCASTER, force=True)
 
     def refresh_app_token(self) -> bool:
-        return self._refresh_token(TokenType.APP)
+        return self._refresh_token(TokenType.APP, force=True)
 
     def refresh_spotify_token(self) -> bool:
-        return self._refresh_token(TokenType.SPOTIFY)
+        return self._refresh_token(TokenType.SPOTIFY, force=True)
 
     def refresh_all_tokens(self):
-        """Refresca todos los tokens (para uso en arranque)."""
+        """Refresca los tokens caducados o desconocidos (arranque / precaución)."""
         results = {
-            TokenType.BOT: self.refresh_bot_token(),
-            TokenType.BROADCASTER: self.refresh_broadcaster_token(),
-            TokenType.APP: self.refresh_app_token(),
-            TokenType.SPOTIFY: self.refresh_spotify_token(),
+            TokenType.BOT: self._refresh_token(TokenType.BOT),
+            TokenType.BROADCASTER: self._refresh_token(TokenType.BROADCASTER),
+            TokenType.APP: self._refresh_token(TokenType.APP),
+            TokenType.SPOTIFY: self._refresh_token(TokenType.SPOTIFY),
         }
         logger.info(f"Refresh all results: {results}")
+
+    def _can_refresh(self) -> bool:
+        """
+        Indica si se permite un refresco forzado (usado por el dashboard).
+        Evita martillear el endpoint OAuth de Twitch en cada petición.
+        """
+        now = time.time()
+        if now - self._last_forced_refresh < self._forced_refresh_cooldown:
+            return False
+        self._last_forced_refresh = now
+        return True
 
     def get_spotify_token(self) -> Optional[str]:
         """Devuelve el access token de Spotify, refrescando si es necesario."""
@@ -237,9 +261,12 @@ class TokenManager:
     # Métodos internos
     # ============================================
 
-    def _refresh_token(self, token_type: TokenType) -> bool:
+    def _refresh_token(self, token_type: TokenType, force: bool = False) -> bool:
         """Refresca un token específico, usando su propio lock."""
         state = self.states[token_type]
+        if force:
+            with state.lock:
+                state.valid = False
 
         # Si es App Token, usamos el método específico
         if token_type == TokenType.APP:
@@ -266,15 +293,18 @@ class TokenManager:
                 new_access = token_data["access_token"]
                 expires_in = token_data.get("expires_in", 14400)
                 new_refresh = token_data.get("refresh_token")  # Puede no venir
+                # Comparar ANTES de actualizar el estado: state.update() sobrescribe
+                # refresh_token y la comparación posterior siempre daba False, así
+                # que el refresh token rotado nunca se guardaba en PostgreSQL.
+                refresh_changed = bool(new_refresh) and new_refresh != state.refresh_token
                 state.update(new_access, expires_in, new_refresh)
 
                 # Guardar refresh token en PostgreSQL si cambió
-                if new_refresh and new_refresh != state.refresh_token:
+                if refresh_changed:
                     if token_type == TokenType.BOT or token_type == TokenType.MODERATOR:
                         settings.update_bot_refresh_token(new_refresh)
                     elif token_type == TokenType.BROADCASTER:
                         settings.update_broadcaster_refresh_token(new_refresh)
-                    state.refresh_token = new_refresh
 
                 # Guardar access token en PostgreSQL (con expiración)
                 self._update_settings_token(token_type, new_access, expires_in)
@@ -335,12 +365,12 @@ class TokenManager:
                 new_access = token_data["access_token"]
                 expires_in = token_data.get("expires_in", 3600)
                 new_refresh = token_data.get("refresh_token")  # Puede cambiar
+                refresh_changed = bool(new_refresh) and new_refresh != state.refresh_token
                 state.update(new_access, expires_in, new_refresh)
 
                 # Guardar refresh token en PostgreSQL si cambió
-                if new_refresh and new_refresh != state.refresh_token:
+                if refresh_changed:
                     settings.update_spotify_refresh_token(new_refresh)
-                    state.refresh_token = new_refresh
 
                 # Guardar access token (aunque settings no lo expone, lo guardamos en la base de datos)
                 from database.token_repository import TokenRepository
@@ -373,6 +403,56 @@ class TokenManager:
             settings.update_broadcaster_token(new_token, expires_in)
         elif token_type == TokenType.APP:
             settings.update_app_token(new_token, expires_in)
+        self._notify_token_listeners(token_type, new_token)
+
+    # ============================================
+    # Avisos de token nuevo (p. ej. para la conexión IRC del bot)
+    # ============================================
+
+    def on_token_refreshed(self, callback):
+        """Registra callback(token_type, access_token) que se llama tras cada token nuevo."""
+        self._listeners.append(callback)
+
+    def _notify_token_listeners(self, token_type: TokenType, access_token: str):
+        for callback in list(self._listeners):
+            try:
+                callback(token_type, access_token)
+            except Exception as e:
+                logger.error(f"Error en listener de token: {e}")
+
+    # ============================================
+    # Tokens nuevos obtenidos al reconectar una cuenta desde el dashboard
+    # ============================================
+
+    def store_authorized_tokens(self, token_type: TokenType, access_token: str,
+                                refresh_token: str, expires_in: int) -> None:
+        """
+        Guarda los tokens obtenidos con el flujo OAuth del dashboard (cuando el
+        refresh token anterior ya no sirve) y los activa sin reiniciar el bot.
+        """
+        from database.token_repository import TokenRepository
+
+        state = self.states[token_type]
+        with state.lock:
+            state.update(access_token, expires_in, refresh_token)
+            if token_type == TokenType.SPOTIFY:
+                TokenRepository.save_token("spotify", "default", access_token, refresh_token, expires_in)
+                settings.SPOTIFY_REFRESH_TOKEN = refresh_token
+            elif token_type == TokenType.BROADCASTER:
+                TokenRepository.save_token("twitch", "broadcaster", access_token, refresh_token, expires_in)
+                settings.BROADCASTER_TOKEN = access_token
+                settings.BROADCASTER_REFRESH_TOKEN = refresh_token
+            else:
+                # El token de moderador es siempre el mismo que el del bot
+                for account in ("bot", "moderator"):
+                    TokenRepository.save_token("twitch", account, access_token, refresh_token, expires_in)
+                settings.BOT_TOKEN = settings.MODERATOR_ACCESS_TOKEN = access_token
+                settings.BOT_REFRESH_TOKEN = settings.MODERATOR_REFRESH_TOKEN = refresh_token
+            TokenValidator.invalidate(access_token)
+
+        log_service.add_log('info', f'Cuenta {token_type.value} reconectada desde el dashboard', 'token_manager')
+        self._notify_token_listeners(token_type, access_token)
+        self._schedule_next_refresh()
 
     # ============================================
     # Scheduler inteligente (EXCLUYE APP TOKEN)

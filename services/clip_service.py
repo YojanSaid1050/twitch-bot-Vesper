@@ -2,8 +2,8 @@
 Servicio para crear y gestionar clips de Twitch
 """
 
+import asyncio
 import requests
-import time
 from typing import Optional, Dict
 
 from config import settings
@@ -18,16 +18,28 @@ class ClipService:
     
     def __init__(self):
         self.broadcaster_id = settings.BROADCASTER_ID
-        self.headers = settings.BROADCASTER_HEADERS
-    
+
+    @property
+    def headers(self) -> Dict[str, str]:
+        # Se leen en cada petición: guardarlos en __init__ dejaba el token de
+        # arranque fijo y !clip fallaba con 401 cuando el token se renovaba.
+        return settings.BROADCASTER_HEADERS
+
+    def _post_clip(self) -> requests.Response:
+        url = "https://api.twitch.tv/helix/clips"
+        params = {"broadcaster_id": self.broadcaster_id}
+        response = requests.post(url, headers=self.headers, params=params, timeout=10)
+        if response.status_code == 401:
+            from services.token_manager import token_manager
+            if token_manager.refresh_broadcaster_token():
+                response = requests.post(url, headers=self.headers, params=params, timeout=10)
+        return response
+
     async def create_clip(self) -> Optional[Dict]:
         try:
-            url = "https://api.twitch.tv/helix/clips"
-            params = {"broadcaster_id": self.broadcaster_id}
-            
-            logger.info(f"Creando clip...")
-            response = requests.post(url, headers=self.headers, params=params)
-            
+            logger.info("Creando clip...")
+            response = await asyncio.to_thread(self._post_clip)
+
             logger.info(f"Respuesta status: {response.status_code}")
             
             if response.status_code == 202:

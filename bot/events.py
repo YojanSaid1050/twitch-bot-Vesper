@@ -11,6 +11,8 @@ from services.moderation_actions import ModerationActions
 from services.notification_service import notification_service
 from services.link_manager import link_manager
 from services.warning_manager import warning_manager
+from services.config_service import config_service
+from services.timers_service import timers_service
 from exceptions import ResourceNotFoundError, TwitchAPIError
 from services.log_service import log_service
 
@@ -40,21 +42,71 @@ class EventHandler:
             return
 
         if channel:
-            await channel.send("🕯️ El vigilante despierta... los ecos del vacío están a tu disposición.")
-            log_service.add_log('info', f'Mensaje de bienvenida enviado a {channel.name}', 'bot')
+            timers_service.start(channel)
+            # event_ready se dispara también en cada reconexión: saludar solo una vez
+            if not getattr(self, '_greeted', False):
+                self._greeted = True
+                await channel.send("🕯️ El vigilante despierta... los ecos del vacío están a tu disposición.")
+                log_service.add_log('info', f'Mensaje de bienvenida enviado a {channel.name}', 'bot')
+
+    @staticmethod
+    def _auto_timeout_seconds() -> int:
+        """Duración del silencio automático configurada en el dashboard (minutos)."""
+        try:
+            minutes = int(config_service.get('moderation.auto_timeout_minutes', 10))
+        except (TypeError, ValueError):
+            minutes = 10
+        return max(1, min(minutes, 20160)) * 60
+
+    async def _punish(self, message: Message, action: str, reason: str, type_desc: str,
+                      count: int, max_w: int, warning_text: str) -> None:
+        """Aplica advertencia / timeout / ban temporal a un mensaje infractor."""
+        name = message.author.name
+        user_id = str(message.author.id)
+
+        if action == 'warning':
+            await message.channel.send(warning_text)
+        elif action == 'timeout':
+            seconds = self._auto_timeout_seconds()
+            try:
+                await mod_actions.timeout(name, seconds, reason, user_id=user_id)
+                await message.channel.send(
+                    f"🔇 {name} silenciado {seconds // 60} minutos por {type_desc} "
+                    f"(advertencia {count}/{max_w})."
+                )
+                log_service.add_log('info', f'Timeout a {name} por {type_desc}', 'moderation')
+            except Exception as e:
+                logger.error(f"Error aplicando timeout: {e}")
+                await message.channel.send(f"⚠️ Error al silenciar a {name}")
+        elif action == 'ban':
+            # Las sanciones automáticas son baneos temporales (14 días);
+            # el baneo permanente queda reservado al comando manual !ban.
+            try:
+                await mod_actions.ban(name, reason, duration=link_manager.BAN_DURATION, user_id=user_id)
+                await message.channel.send(
+                    f"🔨 {name} desterrado 14 días por {type_desc} "
+                    f"(advertencia {count}/{max_w})."
+                )
+                log_service.add_log('warning', f'Ban temporal a {name} por {type_desc}', 'moderation')
+            except Exception as e:
+                logger.error(f"Error aplicando ban: {e}")
+                await message.channel.send(f"⚠️ Error al desterrar a {name}")
 
     async def on_message(self, message: Message):
         if message.echo:
             return
 
+        timers_service.on_chat_line()
+
         # Verificar si es staff (mod o broadcaster)
         is_staff = permission_checker.is_staff(message)
-        is_vip = message.author.is_vip if hasattr(message.author, 'is_vip') else False
+        is_vip = bool(getattr(message.author, 'is_vip', False))
+        max_w = warning_manager.get_max_warnings()
 
-        # ========== ANTI-SPAM (palabras prohibidas, etc) ==========
+        # ========== ANTI-SPAM (palabras prohibidas, mayúsculas, flood) ==========
         if not is_staff:
             is_spam, action, warning_type, reason = anti_spam.check_message(
-                message.author.id,
+                str(message.author.id),
                 message.content,
                 is_vip=is_vip,
                 is_staff=is_staff
@@ -63,22 +115,9 @@ class EventHandler:
             if is_spam:
                 logger.warning(f"🚫 Spam detectado de {message.author.name}: {reason}")
                 log_service.add_log('warning', f'Spam detectado de {message.author.name}: {reason}', 'moderation')
-                
-                # Siempre eliminar el mensaje
-                try:
-                    success = await mod_actions.delete_message(message.id)
-                    if success:
-                        logger.info(f"🗑️ Mensaje eliminado de {message.author.name} (spam)")
-                    else:
-                        logger.warning(f"⚠️ No se pudo eliminar mensaje de {message.author.name} (spam)")
-                except Exception as e:
-                    logger.error(f"Error eliminando mensaje por spam: {e}")
-                
-                # Obtener conteo actual para mostrar
-                count = warning_manager.get_warning_count(message.author.id, warning_type)
-                max_w = warning_manager.get_max_warnings()
-                
-                # Mapeo de tipos a nombres legibles
+                await mod_actions.delete_message(message.id)
+
+                count = warning_manager.get_warning_count(str(message.author.id), warning_type)
                 type_names = {
                     'caps': 'mayúsculas excesivas',
                     'rate': 'envío rápido de mensajes',
@@ -86,39 +125,17 @@ class EventHandler:
                     'word': 'palabra prohibida'
                 }
                 type_desc = type_names.get(warning_type, warning_type)
-                
-                # Aplicar acción según advertencia
-                if action == 'warning':
-                    await message.channel.send(
-                        f"⚠️ {message.author.name}, el vacío detecta ecos no deseados. "
-                        f"Advertencia {count}/{max_w} por {type_desc}."
-                    )
-                elif action == 'timeout':
-                    try:
-                        await mod_actions.timeout(message.author.name, 600, f"Spam repetido: {reason}")
-                        await message.channel.send(
-                            f"🔇 {message.author.name} silenciado 10 minutos por {type_desc} "
-                            f"(advertencia {count}/{max_w})."
-                        )
-                    except Exception as e:
-                        logger.error(f"Error aplicando timeout por spam: {e}")
-                        await message.channel.send(f"⚠️ Error al silenciar a {message.author.name}")
-                elif action == 'ban':
-                    try:
-                        await mod_actions.ban(message.author.name, f"Spam excesivo: {reason}")
-                        await message.channel.send(
-                            f"🔨 {message.author.name} desterrado por {type_desc} "
-                            f"(advertencia {count}/{max_w})."
-                        )
-                    except Exception as e:
-                        logger.error(f"Error aplicando ban por spam: {e}")
-                        await message.channel.send(f"⚠️ Error al desterrar a {message.author.name}")
+                await self._punish(
+                    message, action, f"Spam: {reason}", type_desc, count, max_w,
+                    f"⚠️ {message.author.name}, el vacío detecta ecos no deseados. "
+                    f"Advertencia {count}/{max_w} por {type_desc}."
+                )
                 return
 
         # ========== CONTROL DE ENLACES ==========
         if not is_staff and not is_vip:
             link_result = await link_manager.check_message(
-                message.author.id,
+                str(message.author.id),
                 message.author.name,
                 message.content,
                 is_staff=is_staff,
@@ -127,63 +144,16 @@ class EventHandler:
 
             if link_result:
                 action, reason, blocked_links = link_result
-                count = warning_manager.get_warning_count(message.author.id, 'link')
-                max_w = warning_manager.get_max_warnings()
-
-                # Siempre eliminar el mensaje
-                try:
-                    success = await mod_actions.delete_message(message.id)
-                    if success:
-                        logger.info(f"🗑️ Mensaje eliminado de {message.author.name}: {message.content[:50]}...")
-                    else:
-                        logger.warning(f"⚠️ No se pudo eliminar el mensaje de {message.author.name}")
-                        try:
-                            await message.delete()
-                        except Exception as e:
-                            logger.error(f"Fallback también falló: {e}")
-                except Exception as e:
-                    logger.error(f"Error eliminando mensaje: {e}")
-                    try:
-                        await message.delete()
-                    except Exception as e2:
-                        logger.error(f"Todos los intentos de eliminar mensaje fallaron: {e2}")
-
-                # Acción según advertencia
-                if action == 'warning':
-                    remaining = max_w - count
-                    await message.channel.send(
-                        f"⚠️ {message.author.name}, enlaces prohibidos. "
-                        f"Advertencia {count}/{max_w}. "
-                        f"Quedan {remaining} avisos antes del silencio."
-                    )
-                    logger.info(f"🚫 Enlace bloqueado de {message.author.name} - Advertencia {count}/{max_w}")
-                    log_service.add_log('info', f'Enlace bloqueado de {message.author.name} - Advertencia {count}', 'moderation')
-
-                elif action == 'timeout':
-                    try:
-                        await mod_actions.timeout(message.author.name, link_manager.TIMEOUT_DURATION, reason)
-                        await message.channel.send(
-                            f"🔇 {message.author.name} silenciado {link_manager.TIMEOUT_DURATION // 60} minutos "
-                            f"por enlaces prohibidos (advertencia {count}/{max_w})."
-                        )
-                        logger.info(f"⏰ Timeout a {message.author.name} por enlaces prohibidos")
-                        log_service.add_log('info', f'Timeout a {message.author.name} por enlaces prohibidos', 'moderation')
-                    except Exception as e:
-                        logger.error(f"Error aplicando timeout: {e}")
-                        await message.channel.send(f"⚠️ Error al silenciar a {message.author.name}")
-
-                elif action == 'ban':
-                    try:
-                        await mod_actions.ban(message.author.name, reason)
-                        await message.channel.send(
-                            f"🔨 {message.author.name} desterrado por enlaces prohibidos "
-                            f"(advertencia {count}/{max_w})."
-                        )
-                        logger.info(f"🔨 Ban a {message.author.name} por enlaces prohibidos")
-                        log_service.add_log('info', f'Ban a {message.author.name} por enlaces prohibidos', 'moderation')
-                    except Exception as e:
-                        logger.error(f"Error aplicando ban: {e}")
-                        await message.channel.send(f"⚠️ Error al desterrar a {message.author.name}")
+                count = warning_manager.get_warning_count(str(message.author.id), 'link')
+                await mod_actions.delete_message(message.id)
+                remaining = max(0, max_w - count)
+                await self._punish(
+                    message, action, reason, 'enlaces prohibidos', count, max_w,
+                    f"⚠️ {message.author.name}, enlaces prohibidos. Advertencia {count}/{max_w}. "
+                    f"Quedan {remaining} avisos antes del silencio. Pide a un mod un !permit."
+                )
+                # El mensaje se ha borrado: no ejecutar comandos que contuviera
+                return
 
         # Procesar comandos
         await self.bot.handle_commands(message)
