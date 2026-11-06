@@ -7,7 +7,10 @@ logger = get_logger(__name__)
 
 
 class WarnsSystem:
-    MAX_WARNS = 3
+    @property
+    def MAX_WARNS(self) -> int:
+        # Antes era un 3 fijo e ignoraba el máximo configurado en el dashboard
+        return int(config_service.get_max_warnings() or 3)
 
     def __init__(self):
         self.mod_actions = ModerationActions()
@@ -24,7 +27,8 @@ class WarnsSystem:
             action_taken = False
 
             if warning_count >= self.MAX_WARNS:
-                await self.mod_actions.timeout(user_name, 600, "Máximo de advertencias alcanzado")
+                minutes = int(config_service.get('moderation.auto_timeout_minutes', 10) or 10)
+                await self.mod_actions.timeout(user_name, minutes * 60, "Máximo de advertencias alcanzado", user_id=user_id)
                 action_taken = True
                 config_service.clear_warnings(user_id)
                 # Log de timeout automático (moderación)

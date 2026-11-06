@@ -58,26 +58,16 @@ class TwitchAPI:
             log_service.add_log('error', f'Error refrescando token en TwitchAPI: {e}', 'twitch_api')
             return False
     
-    def _handle_response(self, response: requests.Response, endpoint: str, retry: bool = True) -> Any:
-        if response.status_code == 401 and retry and self._can_refresh():
-            logger.warning("Token expirado, intentando refrescar...")
-            log_service.add_log('warning', f'Token expirado en endpoint {endpoint}, refrescando...', 'twitch_api')
-            if self._refresh_token():
-                time.sleep(1)
-                return self._retry_request(endpoint)
-            else:
-                raise AuthenticationError(
-                    "Token inválido y no se pudo refrescar automáticamente",
-                    status_code=401,
-                    response_text=response.text
-                )
-        
+    def _handle_response(self, response: requests.Response, endpoint: str) -> Any:
         if response.status_code == 204:
             return None
-        
-        if response.status_code == 200:
-            return response.json()
-        
+
+        if response.status_code in (200, 201, 202):
+            try:
+                return response.json()
+            except ValueError:
+                return None
+
         if response.status_code == 400:
             log_service.add_log('error', f'Error 400 en {endpoint}: {response.text[:100]}', 'twitch_api')
             raise TwitchAPIError(f"Solicitud inválida: {response.text}", status_code=400)
@@ -93,97 +83,57 @@ class TwitchAPI:
         else:
             log_service.add_log('error', f'Error {response.status_code} en {endpoint}', 'twitch_api')
             raise TwitchAPIError(f"Error {response.status_code}: {response.text}", status_code=response.status_code)
-    
-    def _retry_request(self, endpoint: str, method: str = "GET", params: Dict = None, json_data: Dict = None):
+
+    def _request(self, method: str, endpoint: str, params: Dict = None, json: Dict = None) -> Any:
+        """
+        Ejecuta una petición HTTP. Si Twitch responde 401 se refresca el token
+        y se reintenta UNA vez con el mismo método, parámetros y cuerpo.
+        (Antes el reintento se hacía siempre como GET sin parámetros.)
+        """
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        try:
-            if method == "GET":
-                response = requests.get(url, headers=self.headers, params=params, timeout=10)
-            elif method == "PATCH":
-                response = requests.patch(url, headers=self.headers, params=params, json=json_data, timeout=10)
-            elif method == "POST":
-                response = requests.post(url, headers=self.headers, params=params, json=json_data, timeout=10)
-            elif method == "PUT":
-                response = requests.put(url, headers=self.headers, params=params, json=json_data, timeout=10)
-            elif method == "DELETE":
-                response = requests.delete(url, headers=self.headers, params=params, timeout=10)
-            else:
-                raise ValueError(f"Método HTTP no soportado: {method}")
-            return self._handle_response(response, endpoint, retry=False)
-        except Exception as e:
-            log_service.add_log('error', f'Error en reintento de {endpoint}: {e}', 'twitch_api')
-            raise TwitchAPIError(f"Error en reintento: {e}")
-    
+        logger.debug(f"{method} {url} params={params} json={json}")
+
+        for attempt in range(2):
+            self._rate_limit_wait()
+            try:
+                response = requests.request(
+                    method,
+                    url,
+                    headers=self.headers,  # se lee en cada intento: tras refrescar trae el token nuevo
+                    params=params,
+                    json=json,
+                    timeout=10,
+                )
+            except requests.RequestException as e:
+                log_service.add_log('error', f'Error de conexión en {method} {endpoint}: {e}', 'twitch_api')
+                raise TwitchAPIError(f"Error de conexión: {e}")
+
+            if response.status_code == 401 and attempt == 0 and self._can_refresh():
+                logger.warning("Token expirado, intentando refrescar...")
+                log_service.add_log('warning', f'Token expirado en endpoint {endpoint}, refrescando...', 'twitch_api')
+                if self._refresh_token():
+                    continue
+                raise AuthenticationError(
+                    "Token inválido y no se pudo refrescar automáticamente",
+                    status_code=401,
+                    response_text=response.text
+                )
+
+            return self._handle_response(response, endpoint)
+
+        return None  # inalcanzable
+
     def get(self, endpoint: str, params: Dict = None) -> Any:
-        self._rate_limit_wait()
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        logger.debug(f"GET {url} params={params}")
-        try:
-            response = requests.get(url, headers=self.headers, params=params, timeout=10)
-            return self._handle_response(response, endpoint)
-        except requests.RequestException as e:
-            log_service.add_log('error', f'Error de conexión en GET {endpoint}: {e}', 'twitch_api')
-            raise TwitchAPIError(f"Error de conexión: {e}")
-    
+        return self._request("GET", endpoint, params=params)
+
     def patch(self, endpoint: str, params: Dict = None, json: Dict = None) -> Any:
-        self._rate_limit_wait()
-        logger.debug(f"PATCH {endpoint} params={params} json={json}")
-        try:
-            response = requests.patch(
-                f"{self.base_url}/{endpoint.lstrip('/')}",
-                headers=self.headers,
-                params=params,
-                json=json,
-                timeout=10
-            )
-            return self._handle_response(response, endpoint)
-        except requests.RequestException as e:
-            log_service.add_log('error', f'Error de conexión en PATCH {endpoint}: {e}', 'twitch_api')
-            raise TwitchAPIError(f"Error de conexión: {e}")
-    
+        return self._request("PATCH", endpoint, params=params, json=json)
+
     def post(self, endpoint: str, params: Dict = None, json: Dict = None) -> Any:
-        self._rate_limit_wait()
-        logger.debug(f"POST {endpoint} params={params} json={json}")
-        try:
-            response = requests.post(
-                f"{self.base_url}/{endpoint.lstrip('/')}",
-                headers=self.headers,
-                params=params,
-                json=json,
-                timeout=10
-            )
-            return self._handle_response(response, endpoint)
-        except requests.RequestException as e:
-            log_service.add_log('error', f'Error de conexión en POST {endpoint}: {e}', 'twitch_api')
-            raise TwitchAPIError(f"Error de conexión: {e}")
-    
+        return self._request("POST", endpoint, params=params, json=json)
+
     def put(self, endpoint: str, params: Dict = None, json: Dict = None) -> Any:
-        self._rate_limit_wait()
-        logger.debug(f"PUT {endpoint} params={params} json={json}")
-        try:
-            response = requests.put(
-                f"{self.base_url}/{endpoint.lstrip('/')}",
-                headers=self.headers,
-                params=params,
-                json=json,
-                timeout=10
-            )
-            return self._handle_response(response, endpoint)
-        except requests.RequestException as e:
-            log_service.add_log('error', f'Error de conexión en PUT {endpoint}: {e}', 'twitch_api')
-            raise TwitchAPIError(f"Error de conexión: {e}")
-    
+        return self._request("PUT", endpoint, params=params, json=json)
+
     def delete(self, endpoint: str, params: Dict = None) -> Any:
-        self._rate_limit_wait()
-        logger.debug(f"DELETE {endpoint} params={params}")
-        try:
-            response = requests.delete(
-                f"{self.base_url}/{endpoint.lstrip('/')}",
-                headers=self.headers,
-                params=params,
-                timeout=10
-            )
-            return self._handle_response(response, endpoint)
-        except requests.RequestException as e:
-            log_service.add_log('error', f'Error de conexión en DELETE {endpoint}: {e}', 'twitch_api')
-            raise TwitchAPIError(f"Error de conexión: {e}")
+        return self._request("DELETE", endpoint, params=params)

@@ -59,6 +59,8 @@ class ConfigService:
                 "default_volume": 50
             },
             "custom_commands": {},
+            "quotes": [],
+            "timers": {},
             "warnings": [],
             "link_management": {
                 "warnings": {},
@@ -229,15 +231,49 @@ class ConfigService:
     def get_custom_commands(self) -> Dict:
         return self.get('custom_commands', {})
 
-    def add_custom_command(self, name: str, response: str, cooldown: int = 0) -> bool:
+    CUSTOM_COMMAND_LEVELS = ('everyone', 'sub', 'vip', 'mod', 'owner')
+
+    def add_custom_command(self, name: str, response: str, cooldown: int = 0,
+                           level: str = 'everyone', user_cooldown: int = 0) -> bool:
         commands = self.get_custom_commands()
+        previous = commands.get(name, {})
         commands[name] = {
             'response': response,
-            'cooldown': cooldown,
-            'created_at': datetime.now().isoformat()
+            'cooldown': max(0, int(cooldown or 0)),
+            'user_cooldown': max(0, int(user_cooldown or 0)),
+            'level': level if level in self.CUSTOM_COMMAND_LEVELS else 'everyone',
+            'count': previous.get('count', 0),
+            'created_at': previous.get('created_at', datetime.now().isoformat())
         }
         log_service.add_log('info', f'Comando personalizado creado: !{name}', 'dashboard')
         return self.set('custom_commands', commands)
+
+    def update_custom_command(self, name: str, **fields) -> bool:
+        """Actualiza campos de un comando existente (response, cooldown, user_cooldown, level)."""
+        commands = self.get_custom_commands()
+        if name not in commands:
+            return False
+        cmd = dict(commands[name])
+        for key, value in fields.items():
+            if key in ('cooldown', 'user_cooldown', 'count'):
+                cmd[key] = max(0, int(value))
+            elif key == 'level':
+                if value not in self.CUSTOM_COMMAND_LEVELS:
+                    return False
+                cmd[key] = value
+            elif key == 'response':
+                cmd[key] = str(value)
+        commands[name] = cmd
+        return self.set('custom_commands', commands)
+
+    def increment_custom_command_count(self, name: str) -> int:
+        commands = self.get_custom_commands()
+        if name not in commands:
+            return 0
+        count = int(commands[name].get('count', 0)) + 1
+        commands[name]['count'] = count
+        self.set('custom_commands', commands)
+        return count
 
     def remove_custom_command(self, name: str) -> bool:
         commands = self.get_custom_commands()
@@ -274,6 +310,58 @@ class ConfigService:
         self.set('warnings', warnings)
         log_service.add_log('info', f'Advertencias limpiadas para usuario {user_id} ({count} eliminadas)', 'moderation')
         return count
+
+    # ---- QUOTES (citas) ----
+    def get_quotes(self) -> List[Dict]:
+        return self.get('quotes', [])
+
+    def add_quote(self, text: str, added_by: str, game: str = '') -> int:
+        quotes = self.get_quotes()
+        next_id = max([q.get('id', 0) for q in quotes], default=0) + 1
+        quotes.append({
+            'id': next_id,
+            'text': text[:400],
+            'added_by': added_by,
+            'game': game,
+            'date': datetime.now().strftime('%Y-%m-%d')
+        })
+        self.set('quotes', quotes)
+        return next_id
+
+    def remove_quote(self, quote_id: int) -> bool:
+        quotes = self.get_quotes()
+        remaining = [q for q in quotes if q.get('id') != quote_id]
+        if len(remaining) == len(quotes):
+            return False
+        return self.set('quotes', remaining)
+
+    # ---- TIMERS (mensajes periódicos) ----
+    def get_timers(self) -> Dict[str, Dict]:
+        return self.get('timers', {})
+
+    def set_timer(self, name: str, message: str, interval_minutes: int, min_lines: int = 5) -> bool:
+        timers = self.get_timers()
+        timers[name] = {
+            'message': message[:500],
+            'interval': max(1, int(interval_minutes)),
+            'min_lines': max(0, int(min_lines)),
+            'enabled': True,
+        }
+        return self.set('timers', timers)
+
+    def toggle_timer(self, name: str, enabled: bool) -> bool:
+        timers = self.get_timers()
+        if name not in timers:
+            return False
+        timers[name]['enabled'] = bool(enabled)
+        return self.set('timers', timers)
+
+    def remove_timer(self, name: str) -> bool:
+        timers = self.get_timers()
+        if name not in timers:
+            return False
+        del timers[name]
+        return self.set('timers', timers)
 
     # ---- SPOTIFY ----
     def get_spotify_volume(self) -> int:

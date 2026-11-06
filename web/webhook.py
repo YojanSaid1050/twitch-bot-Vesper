@@ -89,8 +89,10 @@ _message_cache = MessageIdCache()
 def verify_signature(message: str, signature: str, secret: str) -> bool:
     """Verifica la firma HMAC SHA256 del webhook."""
     if not secret:
-        logger.warning("⚠️ TWITCH_WEBHOOK_SECRET vacío, omitiendo verificación")
-        return True
+        # Antes se devolvía True: sin secreto cualquiera podía enviar eventos falsos
+        # (follows, subs, raids...) al bot. Ahora se rechazan, como dice el aviso.
+        logger.warning("⚠️ TWITCH_WEBHOOK_SECRET vacío: solicitud rechazada")
+        return False
 
     expected = hmac.new(
         secret.encode('utf-8'),

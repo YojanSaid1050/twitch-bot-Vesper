@@ -39,6 +39,8 @@ class Bot(commands.Bot):
 
         self.channel_name = settings.CHANNEL
         self.event_handler = EventHandler(self)
+        self._last_chat_settings = None
+        self._startup_done = False
 
         # Registrar comandos
         from commands import register_commands
@@ -81,22 +83,42 @@ class Bot(commands.Bot):
                 logger.error(f"Error recargando palabras prohibidas: {e}")
                 log_service.add_log('error', f'Error recargando palabras prohibidas: {e}', 'bot')
 
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self.apply_chat_settings())
-            except RuntimeError:
-                logger.warning("⚠️ No hay event loop, ejecutando apply_chat_settings de forma síncrona")
-                log_service.add_log('warning', 'No hay event loop, ejecutando apply_chat_settings de forma síncrona', 'bot')
-                try:
-                    asyncio.run(self.apply_chat_settings())
-                except Exception as e:
-                    logger.error(f"Error en fallback de apply_chat_settings: {e}")
-                    log_service.add_log('error', f'Error en fallback de apply_chat_settings: {e}', 'bot')
+            # Solo reaplicar los modos del chat si cambiaron en la configuración.
+            # Antes se reenviaban a Twitch en CADA guardado (cada advertencia,
+            # cada snapshot de estadísticas...), lo que deshacía un !slow manual.
+            snapshot = self._chat_settings_snapshot()
+            if snapshot != self._last_chat_settings:
+                self._schedule_coroutine(self.apply_chat_settings())
         except Exception as e:
             logger.error(f"Error en _on_config_change: {e}")
             log_service.add_log('error', f'Error en _on_config_change: {e}', 'bot')
 
+    @staticmethod
+    def _chat_settings_snapshot():
+        return (
+            repr(config_service.get_slow_mode()),
+            repr(config_service.get_follower_mode()),
+            bool(config_service.get_emote_mode()),
+            bool(config_service.get_subscriber_mode()),
+        )
+
+    def _schedule_coroutine(self, coro):
+        """Programa una corrutina en el loop del bot desde cualquier hilo (bot o Flask)."""
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is not None:
+            return running.create_task(coro)
+        loop = getattr(self, "loop", None)
+        if loop is not None and loop.is_running():
+            return asyncio.run_coroutine_threadsafe(coro, loop)
+        logger.warning("⚠️ El loop del bot no está activo; se omite la tarea programada")
+        coro.close()
+        return None
+
     async def apply_chat_settings(self):
+        self._last_chat_settings = self._chat_settings_snapshot()
         try:
             slow_mode = config_service.get_slow_mode()
             if slow_mode.get('enabled', False):
@@ -197,6 +219,13 @@ class Bot(commands.Bot):
         # Ejecutar eventos de preparación
         await self.event_handler.on_ready()
 
+        # event_ready también se dispara en cada reconexión al IRC: la
+        # inicialización pesada (polling, EventSub) solo debe hacerse una vez.
+        if self._startup_done:
+            logger.info("🔁 Reconectado al chat (servicios ya iniciados)")
+            return
+        self._startup_done = True
+
         # Iniciar polling de follows
         await self.start_follow_polling()
 
@@ -235,6 +264,11 @@ class Bot(commands.Bot):
         return permission_checker.is_staff(ctx.message)
 
     async def close(self):
+        try:
+            from services.timers_service import timers_service
+            timers_service.stop()
+        except Exception:
+            pass
         try:
             from services.eventsub_service import eventsub_service
             eventsub_service.stop()

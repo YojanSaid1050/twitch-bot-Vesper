@@ -14,10 +14,10 @@ from services.config_service import config_service
 from services.moderation_actions import ModerationActions
 from services.warning_manager import warning_manager
 from utils.logger import get_logger
+from utils.links import BUILTIN_ALLOWED_DOMAINS, extract_domain, extract_links, domain_matches
 from services.log_service import log_service
 
 logger = get_logger(__name__)
-
 
 class LinkManager:
     """
@@ -37,6 +37,8 @@ class LinkManager:
         self._last_token_refresh = 0
         self._refresh_cooldown = 120
         
+        self._permits: Dict[str, float] = {}
+
         self._banned_cache = []
         self._banned_cache_time = 0
         self._banned_cache_ttl = 60
@@ -102,48 +104,45 @@ class LinkManager:
     
     def _extract_links(self, message: str) -> List[str]:
         """Extraer todos los enlaces de un mensaje"""
-        url_pattern = re.compile(
-            r'https?://(?:www\.)?[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:/\S*)?|'
-            r'(?:www\.)[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:/\S*)?|'
-            r'(?:[a-zA-Z0-9-]+\.)+(?:com|net|org|es|io|gg|tv|ly|co|it|eu)(?:/\S*)?'
-        )
-        return url_pattern.findall(message)
+        return extract_links(message)
     
     def is_link_allowed(self, link: str) -> bool:
         """
-        Verificar si un enlace está permitido
+        Verificar si un enlace está permitido.
+        Un dominio permitido cubre también sus subdominios ("youtube.com" permite
+        "m.youtube.com"), pero ya no se aceptan coincidencias parciales: antes
+        "x.com" dejaba pasar "evilx.com" y "spotify.com.malware.xyz" pasaba como Spotify.
         """
         try:
-            parsed = urlparse(link)
-            domain = parsed.netloc.lower()
-            if domain.startswith('www.'):
-                domain = domain[4:]
-            
+            domain = extract_domain(link)
             if not domain:
-                match = re.search(r'(?:[a-zA-Z0-9-]+\.)+(?:com|net|org|es|io|gg|tv|ly|co|it|eu)', link)
-                if match:
-                    domain = match.group()
-            
-            # Spotify: PERMITIDO
-            if 'spotify.com' in domain or 'open.spotify.com' in domain:
+                return False
+
+            if domain_matches(domain, BUILTIN_ALLOWED_DOMAINS):
                 return True
-            
-            # Clips de Twitch: PERMITIDO
-            if 'clips.twitch.tv' in domain:
-                return True
-            
-            # Verificar en la lista de permitidos del dashboard
-            allowed_links = config_service.get_allowed_links()
-            for allowed_domain in allowed_links:
-                if allowed_domain in domain:
-                    return True
-            
-            return False
+
+            return domain_matches(domain, config_service.get_allowed_links().keys())
         except Exception as e:
             logger.error(f"Error verificando enlace {link}: {e}")
             log_service.add_log('error', f'Error verificando enlace {link}: {e}', 'twitch_api')
             return False
-    
+
+    # ============================================
+    # PERMIT (!permit usuario)
+    # ============================================
+
+    def grant_permit(self, user_login: str, seconds: int = 60) -> None:
+        """Permite a un usuario enviar UN mensaje con enlaces durante `seconds`."""
+        self._permits[user_login.lower().lstrip('@')] = time.time() + seconds
+
+    def _consume_permit(self, user_login: str) -> bool:
+        login = (user_login or '').lower()
+        expires = self._permits.get(login)
+        if not expires:
+            return False
+        del self._permits[login]
+        return expires >= time.time()
+
     async def check_message(self, user_id: str, user_name: str, message: str, is_staff: bool = False, is_vip: bool = False) -> Optional[Tuple[str, str, List[str]]]:
         """
         Verificar enlaces en el mensaje
@@ -153,6 +152,10 @@ class LinkManager:
         
         links = self._extract_links(message)
         if not links:
+            return None
+
+        if self._consume_permit(user_name):
+            log_service.add_log('info', f'{user_name} usó su permiso (!permit) para enviar un enlace', 'moderation')
             return None
         
         blocked_links = []

@@ -21,33 +21,44 @@ def setup_staff_commands(bot):
             await ctx.send("🕯️ Uso: !shoutout @streamer")
             return
 
-        username = parts[1].lstrip('@')
-        user_id = await mod_actions.get_user_id(username)
+        user = await mod_actions.get_user(parts[1])
         author = ctx.author.name
 
-        if not user_id:
+        if not user:
+            username = parts[1].lstrip('@')
             await ctx.send(f"❌ No encuentro a {username} en los anales")
             log_service.add_log('warning', f'No se encontró usuario {username} para shoutout', 'bot')
             return
 
-        stats = stats_service
-        original_id = stats.broadcaster_id
-        stats.broadcaster_id = user_id
-        stream_info = await stats.get_stream_info()
-        stats.broadcaster_id = original_id
+        user_id = user["id"]
+        username = user.get("display_name") or user["login"]
+        login = user["login"]
 
         try:
+            # Antes se cambiaba temporalmente stats_service.broadcaster_id, lo que
+            # hacía que otros comandos simultáneos consultaran el canal equivocado.
+            stream_info = await stats_service.get_stream_info(user_id=user_id)
             if stream_info:
-                game = stream_info.get("game_name", "desconocido")
+                game = stream_info.get("game_name") or "algo misterioso"
                 viewers = stream_info.get("viewer_count", 0)
-                await ctx.send(f"🎭 El eco del vacío alza la voz... Shoutout para {username}! Juega {game} con {viewers} almas: https://twitch.tv/{username}")
+                await ctx.send(f"🎭 El eco del vacío alza la voz... ¡Shoutout para {username}! Está en directo con {game} ante {viewers} almas: https://twitch.tv/{login}")
             else:
-                await ctx.send(f"🎭 El eco del vacío alza la voz... Shoutout para {username}! https://twitch.tv/{username}")
-            
+                channel = await stats_service.get_channel_info(broadcaster_id=user_id) or {}
+                game = channel.get("game_name")
+                extra = f" Lo último que jugó: {game}." if game else ""
+                await ctx.send(f"🎭 El eco del vacío alza la voz... ¡Shoutout para {username}!{extra} https://twitch.tv/{login}")
             log_service.add_log('info', f'Shoutout a {username} por {author}', 'moderation')
         except Exception as e:
             await ctx.send(f"❌ Error al obtener info de {username}")
             log_service.add_log('error', f'Error en shoutout a {username}: {e}', 'twitch_api')
+            return
+
+        # Shoutout oficial de Twitch (tarjeta en el chat). Solo funciona en directo
+        # y con cooldown de Twitch; si falla no pasa nada, ya se envió el mensaje.
+        try:
+            await mod_actions.shoutout(user_id)
+        except Exception as e:
+            log_service.add_log('info', f'Shoutout oficial no disponible para {username}: {e}', 'twitch_api')
 
     @bot.command(name="announce", aliases=["anuncio"])
     async def announce_command(ctx):
@@ -55,14 +66,25 @@ def setup_staff_commands(bot):
             return
 
         parts = ctx.message.content.split(" ", 1)
-        if len(parts) < 2:
-            await ctx.send("🕯️ Uso: !announce <mensaje>")
+        if len(parts) < 2 or not parts[1].strip():
+            await ctx.send("🕯️ Uso: !announce [blue|green|orange|purple] <mensaje>")
             return
 
-        message = parts[1]
+        text = parts[1].strip()
+        color = "primary"
+        first, _, rest = text.partition(" ")
+        if first.lower() in ("blue", "green", "orange", "purple") and rest.strip():
+            color, text = first.lower(), rest.strip()
+
         author = ctx.author.name
-        await ctx.send(f"📢 **ANUNCIO DEL RELICARIO** 📢\n🔮 {message}\n📢 {'=' * 20} 📢")
-        log_service.add_log('info', f'Anuncio publicado por {author}: "{message}"', 'moderation')
+        try:
+            # Anuncio destacado nativo de Twitch (requiere moderator:manage:announcements)
+            await mod_actions.announce(f"🔮 {text}", color)
+        except Exception as e:
+            # Twitch no interpreta ** ni saltos de línea: mensaje normal como respaldo
+            log_service.add_log('warning', f'Anuncio nativo no disponible ({e}); usando mensaje normal', 'twitch_api')
+            await ctx.send(f"📢 ANUNCIO DEL RELICARIO 📢 🔮 {text}")
+        log_service.add_log('info', f'Anuncio publicado por {author}: "{text}"', 'moderation')
 
     @bot.command(name="warn")
     async def warn_command(ctx):

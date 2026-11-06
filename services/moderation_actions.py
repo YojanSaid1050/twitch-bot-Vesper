@@ -1,9 +1,13 @@
 """
-Servicio para acciones de moderación (timeout, ban, etc)
+Servicio para acciones de moderación (timeout, ban, VIP, anuncios, shoutouts...)
+
+Todas las llamadas pasan por TwitchAPI (reintento único tras refrescar el token)
+y se ejecutan en un hilo aparte con asyncio.to_thread para no bloquear el
+event loop del bot mientras Twitch responde.
 """
 
-import requests
-from typing import Optional
+import asyncio
+from typing import Optional, Dict, Any
 
 from config import settings
 from services.twitch_api import TwitchAPI
@@ -13,289 +17,195 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Duración máxima de un timeout en Twitch (14 días)
+MAX_TIMEOUT_SECONDS = 1209600
+
+ANNOUNCEMENT_COLORS = ("primary", "blue", "green", "orange", "purple")
+
 
 class ModerationActions:
     """
     Servicio para acciones de moderación
     """
-    
+
     def __init__(self):
+        # Token del bot (moderador) para moderación/chat
         self.api = TwitchAPI(use_broadcaster_token=False)
-        self.broadcaster_id = settings.BROADCASTER_ID
-        self.moderator_id = settings.BOT_ID
-        self.token = settings.BOT_TOKEN
-    
-    async def get_user_id(self, username: str) -> Optional[str]:
-        try:
-            result = self.api.get(
-                "users",
-                params={"login": username.lower()}
-            )
-            data = result.get("data", [])
-            if not data:
-                return None
-            return data[0]["id"]
-        except Exception as e:
-            logger.error(f"Error obteniendo ID de {username}: {e}")
-            log_service.add_log('error', f'Error obteniendo ID de {username}: {e}', 'twitch_api')
+        # Token del streamer para acciones que solo puede hacer el dueño (VIP)
+        self.broadcaster_api = TwitchAPI(use_broadcaster_token=True)
+
+    # Se leen en cada llamada: settings puede recargar los IDs desde la base de datos
+    @property
+    def broadcaster_id(self) -> str:
+        return settings.BROADCASTER_ID
+
+    @property
+    def moderator_id(self) -> str:
+        return settings.MODERATOR_USER_ID or settings.BOT_ID
+
+    def _mod_params(self, **extra) -> Dict[str, Any]:
+        params = {"broadcaster_id": self.broadcaster_id, "moderator_id": self.moderator_id}
+        params.update(extra)
+        return params
+
+    @staticmethod
+    async def _call(func, *args, **kwargs):
+        return await asyncio.to_thread(func, *args, **kwargs)
+
+    # ------------------------------------------------------------------
+    # Usuarios
+    # ------------------------------------------------------------------
+
+    async def get_user(self, username: str) -> Optional[Dict]:
+        """Devuelve el objeto de usuario de Helix (id, login, display_name...) o None."""
+        username = (username or "").strip().lstrip("@").lower()
+        if not username:
             return None
-    
+        try:
+            result = await self._call(self.api.get, "users", params={"login": username})
+            data = (result or {}).get("data", [])
+            return data[0] if data else None
+        except Exception as e:
+            logger.error(f"Error obteniendo usuario {username}: {e}")
+            log_service.add_log('error', f'Error obteniendo usuario {username}: {e}', 'twitch_api')
+            return None
+
+    async def get_user_id(self, username: str) -> Optional[str]:
+        user = await self.get_user(username)
+        return user["id"] if user else None
+
+    async def _require_user_id(self, username: str, user_id: Optional[str] = None) -> str:
+        if user_id:
+            return str(user_id)
+        found = await self.get_user_id(username)
+        if not found:
+            raise ResourceNotFoundError(f"Usuario {username} no encontrado")
+        return found
+
+    # ------------------------------------------------------------------
+    # Mensajes y chat
+    # ------------------------------------------------------------------
+
     async def delete_message(self, message_id: str) -> bool:
-        token = settings.BOT_TOKEN
-        if token.startswith("oauth:"):
-            token = token[6:]
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Client-Id": settings.CLIENT_ID,
-            "Content-Type": "application/json"
-        }
-        
-        params = {
-            "broadcaster_id": self.broadcaster_id,
-            "moderator_id": self.moderator_id,
-            "message_id": message_id
-        }
-        
-        url = f"{self.api.base_url}/moderation/chat"
-        
         try:
-            logger.info(f"🗑️ Intentando eliminar mensaje {message_id}")
-            response = requests.delete(url, headers=headers, params=params, timeout=10)
-            
-            if response.status_code == 204:
-                logger.info(f"✅ Mensaje {message_id} eliminado correctamente")
-                log_service.add_log('info', f'Mensaje {message_id} eliminado', 'moderation')
-                return True
-            elif response.status_code == 401:
-                logger.warning("Token expirado, refrescando...")
-                log_service.add_log('warning', 'Token expirado al eliminar mensaje, refrescando...', 'token_manager')
-                from services.token_manager import token_manager
-                token_manager.refresh_bot_token()
-                return await self.delete_message(message_id)
-            else:
-                logger.error(f"❌ Error eliminando mensaje: {response.status_code} - {response.text}")
-                log_service.add_log('error', f'Error eliminando mensaje {message_id}: {response.status_code}', 'twitch_api')
-                return False
-        except Exception as e:
-            logger.error(f"❌ Excepción al eliminar mensaje: {e}")
-            log_service.add_log('error', f'Excepción al eliminar mensaje {message_id}: {e}', 'bot')
+            await self._call(self.api.delete, "moderation/chat", params=self._mod_params(message_id=message_id))
+            logger.info(f"✅ Mensaje {message_id} eliminado correctamente")
+            log_service.add_log('info', f'Mensaje {message_id} eliminado', 'moderation')
+            return True
+        except TwitchAPIError as e:
+            logger.error(f"❌ Error eliminando mensaje {message_id}: {e}")
+            log_service.add_log('error', f'Error eliminando mensaje {message_id}: {e}', 'twitch_api')
             return False
-    
-    async def timeout(self, username: str, duration_seconds: int, reason: str = "") -> bool:
-        user_id = await self.get_user_id(username)
-        if not user_id:
-            raise ResourceNotFoundError(f"Usuario {username} no encontrado")
-        
-        token = settings.BOT_TOKEN
-        if token.startswith("oauth:"):
-            token = token[6:]
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Client-Id": settings.CLIENT_ID,
-            "Content-Type": "application/json"
-        }
-        
-        url = f"{self.api.base_url}/moderation/bans?broadcaster_id={self.broadcaster_id}&moderator_id={self.moderator_id}"
-        
-        payload = {
-            "data": {
-                "user_id": user_id,
-                "duration": duration_seconds
-            }
-        }
-        if reason:
-            payload["data"]["reason"] = reason[:500]
-        
-        logger.info(f"⏰ Timeout a {username} (ID: {user_id}) por {duration_seconds}s")
-        
-        try:
-            response = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                timeout=10
-            )
-            
-            if response.status_code in [200, 204]:
-                logger.info(f"✅ Timeout aplicado a {username}")
-                log_service.add_log('info', f'Timeout aplicado a {username} por {duration_seconds}s. Razón: {reason}', 'moderation')
-                return True
-            elif response.status_code == 401:
-                logger.warning("Token expirado, refrescando...")
-                log_service.add_log('warning', f'Token expirado al aplicar timeout a {username}', 'token_manager')
-                from services.token_manager import token_manager
-                token_manager.refresh_bot_token()
-                return await self.timeout(username, duration_seconds, reason)
-            else:
-                error_msg = f"Error {response.status_code}: {response.text}"
-                logger.error(f"❌ {error_msg}")
-                log_service.add_log('error', f'Error aplicando timeout a {username}: {response.status_code}', 'twitch_api')
-                raise TwitchAPIError(error_msg, status_code=response.status_code)
-        except Exception as e:
-            logger.error(f"❌ Error en timeout: {e}")
-            log_service.add_log('error', f'Error en timeout a {username}: {e}', 'twitch_api')
-            raise TwitchAPIError(f"Error en timeout: {e}")
-    
-    async def ban(self, username: str, reason: str = "") -> bool:
-        log_service.add_log('info', f'Ban aplicado a {username}. Razón: {reason}', 'moderation')
-        return await self.timeout(username, 1209600, reason)
-    
-    async def unban(self, username: str) -> bool:
-        user_id = await self.get_user_id(username)
-        if not user_id:
-            raise ResourceNotFoundError(f"Usuario {username} no encontrado")
-        
-        token = settings.BOT_TOKEN
-        if token.startswith("oauth:"):
-            token = token[6:]
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Client-Id": settings.CLIENT_ID,
-            "Content-Type": "application/json"
-        }
-        
-        url = f"{self.api.base_url}/moderation/bans?broadcaster_id={self.broadcaster_id}&moderator_id={self.moderator_id}&user_id={user_id}"
-        
-        try:
-            response = requests.delete(url, headers=headers, timeout=10)
-            if response.status_code == 204:
-                logger.info(f"✅ {username} desbaneado")
-                log_service.add_log('info', f'Unban aplicado a {username}', 'moderation')
-                return True
-            elif response.status_code == 401:
-                logger.warning("Token expirado, refrescando...")
-                log_service.add_log('warning', f'Token expirado al desbanear a {username}', 'token_manager')
-                from services.token_manager import token_manager
-                token_manager.refresh_bot_token()
-                return await self.unban(username)
-            else:
-                logger.error(f"❌ Error desbaneando: {response.status_code} - {response.text}")
-                log_service.add_log('error', f'Error desbaneando a {username}: {response.status_code}', 'twitch_api')
-                return False
-        except Exception as e:
-            logger.error(f"❌ Error desbaneando: {e}")
-            log_service.add_log('error', f'Error desbaneando a {username}: {e}', 'twitch_api')
-            return False
-    
+
     async def clear_chat(self) -> bool:
-        token = settings.BOT_TOKEN
-        if token.startswith("oauth:"):
-            token = token[6:]
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Client-Id": settings.CLIENT_ID,
-            "Content-Type": "application/json"
-        }
-        
-        url = f"{self.api.base_url}/moderation/chat_clear?broadcaster_id={self.broadcaster_id}&moderator_id={self.moderator_id}"
-        
-        try:
-            response = requests.post(url, headers=headers, timeout=10)
-            if response.status_code == 204:
-                logger.info("✅ Chat limpiado")
-                log_service.add_log('info', 'Chat limpiado', 'moderation')
-                return True
-            elif response.status_code == 401:
-                logger.warning("Token expirado, refrescando...")
-                log_service.add_log('warning', 'Token expirado al limpiar chat', 'token_manager')
-                from services.token_manager import token_manager
-                token_manager.refresh_bot_token()
-                return await self.clear_chat()
-            else:
-                logger.error(f"❌ Error limpiando chat: {response.status_code} - {response.text}")
-                log_service.add_log('error', f'Error limpiando chat: {response.status_code}', 'twitch_api')
-                return False
-        except Exception as e:
-            logger.error(f"❌ Error limpiando chat: {e}")
-            log_service.add_log('error', f'Error limpiando chat: {e}', 'twitch_api')
-            return False
-    
+        """Borra todo el chat (DELETE /moderation/chat sin message_id)."""
+        await self._call(self.api.delete, "moderation/chat", params=self._mod_params())
+        logger.info("✅ Chat limpiado")
+        log_service.add_log('info', 'Chat limpiado', 'moderation')
+        return True
+
+    async def announce(self, message: str, color: str = "primary") -> bool:
+        """Envía un anuncio destacado (requiere moderator:manage:announcements)."""
+        color = color if color in ANNOUNCEMENT_COLORS else "primary"
+        await self._call(
+            self.api.post,
+            "chat/announcements",
+            params=self._mod_params(),
+            json={"message": message[:500], "color": color},
+        )
+        log_service.add_log('info', f'Anuncio enviado: "{message[:80]}"', 'moderation')
+        return True
+
+    async def shoutout(self, to_user_id: str) -> bool:
+        """Shoutout oficial de Twitch (requiere moderator:manage:shoutouts)."""
+        await self._call(
+            self.api.post,
+            "chat/shoutouts",
+            params={
+                "from_broadcaster_id": self.broadcaster_id,
+                "to_broadcaster_id": to_user_id,
+                "moderator_id": self.moderator_id,
+            },
+        )
+        return True
+
+    # ------------------------------------------------------------------
+    # Timeouts y baneos
+    # ------------------------------------------------------------------
+
+    async def _ban_request(self, user_id: str, reason: str, duration: Optional[int]) -> None:
+        data: Dict[str, Any] = {"user_id": user_id}
+        if duration:
+            data["duration"] = max(1, min(int(duration), MAX_TIMEOUT_SECONDS))
+        if reason:
+            data["reason"] = reason[:500]
+        await self._call(self.api.post, "moderation/bans", params=self._mod_params(), json={"data": data})
+
+    async def timeout(self, username: str, duration_seconds: int, reason: str = "", user_id: Optional[str] = None) -> bool:
+        target_id = await self._require_user_id(username, user_id)
+        logger.info(f"⏰ Timeout a {username} (ID: {target_id}) por {duration_seconds}s")
+        await self._ban_request(target_id, reason, duration_seconds)
+        log_service.add_log('info', f'Timeout aplicado a {username} por {duration_seconds}s. Razón: {reason}', 'moderation')
+        return True
+
+    async def ban(self, username: str, reason: str = "", duration: Optional[int] = None, user_id: Optional[str] = None) -> bool:
+        """
+        Banea a un usuario. Sin `duration` el baneo es PERMANENTE (antes era
+        un timeout de 14 días). Las sanciones automáticas pueden pasar una
+        duración para mantener el comportamiento temporal.
+        """
+        target_id = await self._require_user_id(username, user_id)
+        await self._ban_request(target_id, reason, duration)
+        tipo = f"temporal ({duration}s)" if duration else "permanente"
+        log_service.add_log('warning', f'Ban {tipo} aplicado a {username}. Razón: {reason}', 'moderation')
+        return True
+
+    async def unban(self, username: str, user_id: Optional[str] = None) -> bool:
+        target_id = await self._require_user_id(username, user_id)
+        await self._call(self.api.delete, "moderation/bans", params=self._mod_params(user_id=target_id))
+        logger.info(f"✅ {username} desbaneado")
+        log_service.add_log('info', f'Unban aplicado a {username}', 'moderation')
+        return True
+
+    # ------------------------------------------------------------------
+    # VIP (solo el streamer puede gestionarlos)
+    # ------------------------------------------------------------------
+
     async def vip(self, username: str) -> bool:
-        user_id = await self.get_user_id(username)
-        if not user_id:
-            raise ResourceNotFoundError(f"Usuario {username} no encontrado")
-        
-        token = settings.BROADCASTER_TOKEN
-        if token.startswith("oauth:"):
-            token = token[6:]
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Client-Id": settings.CLIENT_ID,
-            "Content-Type": "application/json"
-        }
-        
-        params = {
-            "broadcaster_id": self.broadcaster_id,
-            "user_id": user_id
-        }
-        
-        url = f"{self.api.base_url}/channels/vips"
-        
-        try:
-            response = requests.post(url, headers=headers, params=params, timeout=10)
-            if response.status_code == 204:
-                logger.info(f"✅ {username} es VIP ahora")
-                log_service.add_log('info', f'VIP añadido a {username}', 'moderation')
-                return True
-            elif response.status_code == 401:
-                logger.warning("Token expirado, refrescando...")
-                log_service.add_log('warning', f'Token expirado al agregar VIP a {username}', 'token_manager')
-                from services.token_manager import token_manager
-                token_manager.refresh_broadcaster_token()
-                return await self.vip(username)
-            else:
-                logger.error(f"❌ Error agregando VIP: {response.status_code} - {response.text}")
-                log_service.add_log('error', f'Error agregando VIP a {username}: {response.status_code}', 'twitch_api')
-                return False
-        except Exception as e:
-            logger.error(f"❌ Error agregando VIP: {e}")
-            log_service.add_log('error', f'Error agregando VIP a {username}: {e}', 'twitch_api')
-            return False
-    
+        target_id = await self._require_user_id(username)
+        await self._call(
+            self.broadcaster_api.post,
+            "channels/vips",
+            params={"broadcaster_id": self.broadcaster_id, "user_id": target_id},
+        )
+        logger.info(f"✅ {username} es VIP ahora")
+        log_service.add_log('info', f'VIP añadido a {username}', 'moderation')
+        return True
+
     async def unvip(self, username: str) -> bool:
-        user_id = await self.get_user_id(username)
-        if not user_id:
-            raise ResourceNotFoundError(f"Usuario {username} no encontrado")
-        
-        token = settings.BROADCASTER_TOKEN
-        if token.startswith("oauth:"):
-            token = token[6:]
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Client-Id": settings.CLIENT_ID,
-            "Content-Type": "application/json"
-        }
-        
-        params = {
-            "broadcaster_id": self.broadcaster_id,
-            "user_id": user_id
-        }
-        
-        url = f"{self.api.base_url}/channels/vips"
-        
-        try:
-            response = requests.delete(url, headers=headers, params=params, timeout=10)
-            if response.status_code == 204:
-                logger.info(f"✅ {username} ya no es VIP")
-                log_service.add_log('info', f'VIP removido de {username}', 'moderation')
-                return True
-            elif response.status_code == 401:
-                logger.warning("Token expirado, refrescando...")
-                log_service.add_log('warning', f'Token expirado al remover VIP de {username}', 'token_manager')
-                from services.token_manager import token_manager
-                token_manager.refresh_broadcaster_token()
-                return await self.unvip(username)
-            else:
-                logger.error(f"❌ Error removiendo VIP: {response.status_code} - {response.text}")
-                log_service.add_log('error', f'Error removiendo VIP de {username}: {response.status_code}', 'twitch_api')
-                return False
-        except Exception as e:
-            logger.error(f"❌ Error removiendo VIP: {e}")
-            log_service.add_log('error', f'Error removiendo VIP de {username}: {e}', 'twitch_api')
-            return False
+        target_id = await self._require_user_id(username)
+        await self._call(
+            self.broadcaster_api.delete,
+            "channels/vips",
+            params={"broadcaster_id": self.broadcaster_id, "user_id": target_id},
+        )
+        logger.info(f"✅ {username} ya no es VIP")
+        log_service.add_log('info', f'VIP removido de {username}', 'moderation')
+        return True
+
+    # ------------------------------------------------------------------
+    # Seguidores
+    # ------------------------------------------------------------------
+
+    async def get_follow_date(self, user_id: str) -> Optional[str]:
+        """
+        Fecha ISO en que `user_id` empezó a seguir el canal, o None si no lo sigue.
+        Requiere moderator:read:followers en el token del bot.
+        """
+        result = await self._call(
+            self.api.get,
+            "channels/followers",
+            params={"broadcaster_id": self.broadcaster_id, "user_id": user_id},
+        )
+        data = (result or {}).get("data", [])
+        return data[0].get("followed_at") if data else None

@@ -8,6 +8,9 @@ import os
 import sys
 import asyncio
 import time
+import hmac
+import secrets
+from collections import defaultdict, deque
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -34,7 +37,21 @@ from exceptions import TwitchAPIError, AuthenticationError
 logger = get_logger(__name__)
 
 app = Flask(__name__)
-app.secret_key = os.getenv("DASHBOARD_SECRET_KEY", "supersecretkey_change_me")
+_secret_key = os.getenv("DASHBOARD_SECRET_KEY", "")
+if not _secret_key or _secret_key == "supersecretkey_change_me":
+    # Con la clave por defecto (pública en el repo) cualquiera podía falsificar
+    # la cookie de sesión y entrar al dashboard sin contraseña.
+    _secret_key = secrets.token_hex(32)
+    logger.warning("⚠️ DASHBOARD_SECRET_KEY no configurada: se usa una clave aleatoria "
+                   "(las sesiones se cerrarán al reiniciar). Configúrala en las variables de entorno.")
+app.secret_key = _secret_key
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Cookies solo por HTTPS en Render (siempre HTTPS) o si se pide explícitamente;
+# en local por http:// el login seguiría funcionando.
+app.config['SESSION_COOKIE_SECURE'] = bool(os.getenv("RENDER")) or os.getenv("DASHBOARD_SECURE_COOKIES", "").lower() in ("1", "true", "yes")
+app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+app.config['REMEMBER_COOKIE_SECURE'] = app.config['SESSION_COOKIE_SECURE']
 app.permanent_session_lifetime = timedelta(hours=1)
 app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024  # 10 MB
 
@@ -161,19 +178,52 @@ def call_twitch_api_async(coro, *args, **kwargs):
 # RUTAS DE PÁGINAS (dashboard)
 # ============================================
 
+# Protección contra fuerza bruta: máx. 5 intentos fallidos por IP cada 10 minutos
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 600
+_failed_logins = defaultdict(deque)
+
+
+def _client_ip() -> str:
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    return forwarded.split(',')[0].strip() if forwarded else (request.remote_addr or 'unknown')
+
+
+def _login_blocked(ip: str) -> bool:
+    attempts = _failed_logins[ip]
+    now = time.time()
+    while attempts and now - attempts[0] > _LOGIN_WINDOW_SECONDS:
+        attempts.popleft()
+    return len(attempts) >= _LOGIN_MAX_ATTEMPTS
+
+
+def check_dashboard_password(password: str) -> bool:
+    """Comparación en tiempo constante (evita ataques de temporización)."""
+    stored = config_service.get_dashboard_password() or ''
+    return hmac.compare_digest(password.encode('utf-8'), stored.encode('utf-8'))
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
     if request.method == 'POST':
+        ip = _client_ip()
+        if _login_blocked(ip):
+            log_service.add_log('warning', f'Login bloqueado temporalmente para {ip} (demasiados intentos)', 'dashboard')
+            return render_template('login.html', error='⏳ Demasiados intentos. Espera unos minutos.'), 429
         password = request.form.get('password', '')
-        stored_password = config_service.get_dashboard_password()
-        if password == stored_password:
+        if check_dashboard_password(password):
+            _failed_logins.pop(ip, None)
             user = User(1)
             login_user(user)
             session.permanent = True
+            if config_service.get_dashboard_password() == 'admin123':
+                log_service.add_log('warning', 'El dashboard sigue usando la contraseña por defecto (admin123). Cámbiala en Ajustes.', 'dashboard')
             return redirect(url_for('index'))
         else:
+            _failed_logins[ip].append(time.time())
+            log_service.add_log('warning', f'Intento de login fallido desde {ip}', 'dashboard')
             return render_template('login.html', error='❌ Contraseña incorrecta')
     return render_template('login.html')
 
@@ -235,7 +285,10 @@ def logs_page():
 @app.route('/api/dashboard-data')
 @login_required
 def api_dashboard_data():
+    global _tokens_ready
     force_refresh = request.args.get('force', 'false').lower() == 'true'
+    if not _tokens_ready and token_manager.are_tokens_valid():
+        _tokens_ready = True
     if not _tokens_ready:
         if token_manager._can_refresh():
             logger.info("🔄 Tokens no listos, forzando refresco desde el dashboard...")
@@ -1050,6 +1103,9 @@ def api_get_commands():
                 'name': name,
                 'response': data.get('response', ''),
                 'cooldown': data.get('cooldown', 0),
+                'user_cooldown': data.get('user_cooldown', 0),
+                'level': data.get('level', 'everyone'),
+                'count': data.get('count', 0),
                 'created_at': data.get('created_at', '')
             })
         return jsonify(command_list)
@@ -1067,16 +1123,18 @@ def api_add_command():
         name = data.get('name', '').strip().lower()
         response = data.get('response', '').strip()
         cooldown = int(data.get('cooldown', 0))
+        user_cooldown = int(data.get('user_cooldown', 0))
+        level = data.get('level', 'everyone')
+        name = name.lstrip('!')
         if not name or not response:
             return jsonify({'error': 'Nombre y respuesta son requeridos'}), 400
-        base_commands = ['hola', 'ping', 'comandos', 'title', 'game', 'slow', 'followers',
-                         'emote', 'subscribers', 'vip', 'timeout', 'ban', '8ball', 'dado',
-                         'moneda', 'elige', 'lurk', 'uptime', 'viewers', 'shoutout',
-                         'announce', 'warn', 'sr', 'current', 'skip', 'pause', 'resume',
-                         'queue', 'remove', 'clearqueue', 'volumen', 'clip']
-        if name in base_commands:
+        from commands.custom import BASE_COMMANDS, NAME_RE
+        if not NAME_RE.match(name):
+            return jsonify({'error': 'Nombre inválido (letras, números o _; máx. 25 caracteres)'}), 400
+        reserved = name in BASE_COMMANDS or (_bot_instance is not None and _bot_instance.get_command(name) is not None)
+        if reserved:
             return jsonify({'error': f'"{name}" es un comando base'}), 400
-        success = config_service.add_custom_command(name, response, cooldown)
+        success = config_service.add_custom_command(name, response, cooldown, level=level, user_cooldown=user_cooldown)
         if success:
             log_service.add_log('info', f'Comando !{name} creado por {current_user.username}', 'dashboard')
             return jsonify({'message': f'Comando !{name} creado', 'success': True})
@@ -1247,11 +1305,10 @@ def api_change_password():
         new = data.get('new', '')
         if not current or not new:
             return jsonify({'error': 'Contraseña actual y nueva requeridas'}), 400
-        stored_password = config_service.get_dashboard_password()
-        if current != stored_password:
+        if not check_dashboard_password(current):
             return jsonify({'error': 'Contraseña actual incorrecta'}), 401
-        if len(new) < 6:
-            return jsonify({'error': 'La nueva contraseña debe tener al menos 6 caracteres'}), 400
+        if len(new) < 8:
+            return jsonify({'error': 'La nueva contraseña debe tener al menos 8 caracteres'}), 400
         success = config_service.set_dashboard_password(new)
         if success:
             log_service.add_log('info', f'Contraseña del dashboard actualizada por {current_user.username}', 'dashboard')

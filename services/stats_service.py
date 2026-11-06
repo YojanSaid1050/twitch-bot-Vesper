@@ -2,6 +2,7 @@
 Servicio de estadísticas del stream
 """
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 
@@ -23,25 +24,24 @@ class StatsService:
         self._stream_info = None
         self._last_update = None
     
-    async def get_stream_info(self) -> Optional[Dict]:
-        """Obtener información actual del stream"""
+    async def get_stream_info(self, user_id: Optional[str] = None) -> Optional[Dict]:
+        """Obtener información actual del stream (del canal o de otro usuario)"""
         try:
-            result = self.api.get(
+            result = await asyncio.to_thread(
+                self.api.get,
                 "streams",
-                params={"user_id": self.broadcaster_id}
+                params={"user_id": user_id or self.broadcaster_id}
             )
-            
-            data = result.get("data", [])
-            
+
+            data = (result or {}).get("data", [])
+
             if not data:
                 return None
-            
-            # Log de éxito (estadísticas)
+
             stream_data = data[0]
-            log_service.add_log(
-                'info', 
-                f'Stream info obtenida: {stream_data.get("game_name", "Desconocido")} - {stream_data.get("viewer_count", 0)} viewers',
-                'stats'
+            logger.debug(
+                f'Stream info obtenida: {stream_data.get("game_name", "Desconocido")} - '
+                f'{stream_data.get("viewer_count", 0)} viewers'
             )
             return stream_data
         except TwitchAPIError as e:
@@ -49,27 +49,21 @@ class StatsService:
             log_service.add_log('error', f'Error obteniendo stream info: {e}', 'twitch_api')
             return None
     
-    async def get_channel_info(self) -> Optional[Dict]:
+    async def get_channel_info(self, broadcaster_id: Optional[str] = None) -> Optional[Dict]:
         """Obtener información del canal (título, juego, etc)"""
         try:
-            result = self.api.get(
+            result = await asyncio.to_thread(
+                self.api.get,
                 "channels",
-                params={"broadcaster_id": self.broadcaster_id}
+                params={"broadcaster_id": broadcaster_id or self.broadcaster_id}
             )
-            
-            data = result.get("data", [])
-            
+
+            data = (result or {}).get("data", [])
+
             if not data:
                 return None
-            
-            # Log de éxito (estadísticas)
-            channel_data = data[0]
-            log_service.add_log(
-                'info', 
-                f'Canal info obtenida: "{channel_data.get("title", "Sin título")}" - {channel_data.get("game_name", "No especificado")}',
-                'stats'
-            )
-            return channel_data
+
+            return data[0]
         except TwitchAPIError as e:
             logger.error(f"Error obteniendo canal info: {e}")
             log_service.add_log('error', f'Error obteniendo canal info: {e}', 'twitch_api')
@@ -129,7 +123,7 @@ class StatsService:
         if uptime.total_seconds() > 60:
             hours = uptime.seconds // 3600
             minutes = (uptime.seconds % 3600) // 60
-            log_service.add_log('info', f'Uptime calculado: {hours}h {minutes}m', 'stats')
+            logger.debug(f'Uptime calculado: {hours}h {minutes}m')
         
         return uptime
     
@@ -143,7 +137,7 @@ class StatsService:
         viewers = stream_info.get("viewer_count", 0)
         # Log de éxito (estadísticas) - solo si hay espectadores
         if viewers > 0:
-            log_service.add_log('info', f'Espectadores actuales: {viewers}', 'stats')
+            logger.debug(f'Espectadores actuales: {viewers}')
         return viewers
     
     async def format_uptime(self) -> str:
