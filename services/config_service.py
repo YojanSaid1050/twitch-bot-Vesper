@@ -328,6 +328,17 @@ class ConfigService:
         self.set('quotes', quotes)
         return next_id
 
+    def update_quote(self, quote_id: int, text: str = None, game: str = None) -> bool:
+        quotes = self.get_quotes()
+        for quote in quotes:
+            if quote.get('id') == quote_id:
+                if text is not None:
+                    quote['text'] = text[:400]
+                if game is not None:
+                    quote['game'] = game[:100]
+                return self.set('quotes', quotes)
+        return False
+
     def remove_quote(self, quote_id: int) -> bool:
         quotes = self.get_quotes()
         remaining = [q for q in quotes if q.get('id') != quote_id]

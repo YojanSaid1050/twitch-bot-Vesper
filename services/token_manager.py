@@ -83,6 +83,8 @@ class TokenManager:
         self._refresh_timer: Optional[threading.Timer] = None
         self._shutdown_event = threading.Event()
 
+        self._listeners = []
+
         # Cooldown para refrescos forzados desde fuera (dashboard)
         self._last_forced_refresh = 0.0
         self._forced_refresh_cooldown = 120
@@ -401,6 +403,56 @@ class TokenManager:
             settings.update_broadcaster_token(new_token, expires_in)
         elif token_type == TokenType.APP:
             settings.update_app_token(new_token, expires_in)
+        self._notify_token_listeners(token_type, new_token)
+
+    # ============================================
+    # Avisos de token nuevo (p. ej. para la conexión IRC del bot)
+    # ============================================
+
+    def on_token_refreshed(self, callback):
+        """Registra callback(token_type, access_token) que se llama tras cada token nuevo."""
+        self._listeners.append(callback)
+
+    def _notify_token_listeners(self, token_type: TokenType, access_token: str):
+        for callback in list(self._listeners):
+            try:
+                callback(token_type, access_token)
+            except Exception as e:
+                logger.error(f"Error en listener de token: {e}")
+
+    # ============================================
+    # Tokens nuevos obtenidos al reconectar una cuenta desde el dashboard
+    # ============================================
+
+    def store_authorized_tokens(self, token_type: TokenType, access_token: str,
+                                refresh_token: str, expires_in: int) -> None:
+        """
+        Guarda los tokens obtenidos con el flujo OAuth del dashboard (cuando el
+        refresh token anterior ya no sirve) y los activa sin reiniciar el bot.
+        """
+        from database.token_repository import TokenRepository
+
+        state = self.states[token_type]
+        with state.lock:
+            state.update(access_token, expires_in, refresh_token)
+            if token_type == TokenType.SPOTIFY:
+                TokenRepository.save_token("spotify", "default", access_token, refresh_token, expires_in)
+                settings.SPOTIFY_REFRESH_TOKEN = refresh_token
+            elif token_type == TokenType.BROADCASTER:
+                TokenRepository.save_token("twitch", "broadcaster", access_token, refresh_token, expires_in)
+                settings.BROADCASTER_TOKEN = access_token
+                settings.BROADCASTER_REFRESH_TOKEN = refresh_token
+            else:
+                # El token de moderador es siempre el mismo que el del bot
+                for account in ("bot", "moderator"):
+                    TokenRepository.save_token("twitch", account, access_token, refresh_token, expires_in)
+                settings.BOT_TOKEN = settings.MODERATOR_ACCESS_TOKEN = access_token
+                settings.BOT_REFRESH_TOKEN = settings.MODERATOR_REFRESH_TOKEN = refresh_token
+            TokenValidator.invalidate(access_token)
+
+        log_service.add_log('info', f'Cuenta {token_type.value} reconectada desde el dashboard', 'token_manager')
+        self._notify_token_listeners(token_type, access_token)
+        self._schedule_next_refresh()
 
     # ============================================
     # Scheduler inteligente (EXCLUYE APP TOKEN)

@@ -65,6 +65,31 @@ Los timers solo se envían con el directo en vivo y si han llegado al menos
 - `!clip` tiene cooldown (30 s global, 2 min por usuario; el staff se lo salta).
 - `!shoutout` también lanza el shoutout oficial de Twitch cuando es posible.
 
+## Panel web
+
+- **Timers**: crear, editar, pausar/activar y borrar los mensajes automáticos.
+- **Citas**: añadir, editar, buscar y borrar citas.
+- **Comandos**: ahora también se elige quién puede usarlos, el cooldown por usuario y se ven los usos.
+- **Conexiones**: estado de los tokens del bot, del streamer y de Spotify, con dos botones:
+  - *Renovar ahora*: fuerza la renovación con el refresh token guardado.
+  - *Reconectar*: abre el login de Twitch/Spotify y guarda tokens nuevos sin reiniciar
+    el bot. Úsalo si la cuenta aparece desconectada (contraseña cambiada, permisos
+    revocados...) o si faltan permisos.
+
+### Configurar «Reconectar» (solo una vez)
+
+1. En https://dev.twitch.tv/console/apps abre tu app y añade como *OAuth Redirect URL*:
+   `https://TU-DOMINIO/oauth/twitch/callback`
+2. En https://developer.spotify.com/dashboard añade como *Redirect URI*:
+   `https://TU-DOMINIO/oauth/spotify/callback`
+3. La página *Conexiones* muestra las URLs exactas con un botón para copiarlas.
+   Se calculan a partir de `EVENTSUB_CALLBACK_URL`; si no coinciden con tu dominio
+   público, define la variable `PUBLIC_URL` (ej. `https://vesper.onrender.com`).
+
+Al reconectar la cuenta del bot, inicia sesión en Twitch **con la cuenta del bot**
+(si el navegador tiene abierta la del streamer, usa una ventana privada). El panel
+rechaza el token si es de otra cuenta.
+
 ## Permisos (scopes) de Twitch necesarios
 
 Token del **bot** (moderador):
@@ -84,6 +109,7 @@ Si falta `moderator:manage:shoutouts`, `!so` envía solo el mensaje de texto.
 - `DASHBOARD_SECRET_KEY`: obligatoria en producción. Si no se define se usa una
   clave aleatoria y las sesiones del dashboard se cierran al reiniciar.
 - `TWITCH_WEBHOOK_SECRET`: sin ella el webhook de EventSub rechaza todas las peticiones.
+- `PUBLIC_URL`: dirección pública del panel, para el botón «Reconectar» (opcional).
 - `DASHBOARD_SECURE_COOKIES=1`: envía la cookie de sesión solo por HTTPS (en Render se activa sola).
 
 ## Tests

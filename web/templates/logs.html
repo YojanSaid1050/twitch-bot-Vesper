@@ -829,7 +829,7 @@
                         <td><strong>${log.level}</strong></td>
                         <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">${new Date(log.timestamp).toLocaleString()}</td>
                         <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">${sourceDisplay}</td>
-                        <td style="word-break:break-word;">${log.message}</td>
+                        <td style="word-break:break-word;">${escapeHtml(log.message)}</td>
                     </tr>
                 `}).join('');
 
@@ -959,7 +959,7 @@
                     <tr class="log-level-${log.level}">
                         <td><strong>${log.level}</strong></td>
                         <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">${new Date(log.timestamp).toLocaleString()}</td>
-                        <td style="word-break:break-word;">${log.message}</td>
+                        <td style="word-break:break-word;">${escapeHtml(log.message)}</td>
                     </tr>
                 `).join('');
 
@@ -1045,7 +1045,7 @@
                     <tr class="log-level-${log.level}">
                         <td><strong>${log.level}</strong></td>
                         <td style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">${new Date(log.timestamp).toLocaleString()}</td>
-                        <td style="word-break:break-word;">${log.message}</td>
+                        <td style="word-break:break-word;">${escapeHtml(log.message)}</td>
                     </tr>
                 `).join('');
 

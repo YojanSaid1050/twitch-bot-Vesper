@@ -28,14 +28,35 @@
                 <div class="form-group cooldown-group">
                     <label><i class="fas fa-clock"></i> Cooldown (s)</label>
                     <div class="cooldown-input-wrapper">
-                        <input type="number" id="cmd-cooldown" class="form-control" value="0" min="0" max="300">
+                        <input type="number" id="cmd-cooldown" class="form-control" value="0" min="0" max="3600">
                     </div>
+                </div>
+                <div class="form-group cooldown-group">
+                    <label><i class="fas fa-user-clock"></i> Por usuario (s)</label>
+                    <div class="cooldown-input-wrapper">
+                        <input type="number" id="cmd-user-cooldown" class="form-control" value="0" min="0" max="86400">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-lock"></i> Quién puede usarlo</label>
+                    <select id="cmd-level" class="form-control">
+                        <option value="everyone">Todos</option>
+                        <option value="sub">Suscriptores</option>
+                        <option value="vip">VIP</option>
+                        <option value="mod">Moderadores</option>
+                        <option value="owner">Solo el streamer</option>
+                    </select>
                 </div>
                 <button type="submit" class="btn-primary" style="align-self: flex-end;">
                     <i class="fas fa-plus"></i> Crear
                 </button>
             </form>
             <div id="cmd-form-message" style="margin-top:12px;"></div>
+            <p class="text-muted" style="font-size: 12.5px; line-height: 1.6; margin: 4px 0 0;">
+                Variables: <code>{user}</code> <code>{touser}</code> <code>{args}</code> <code>{1}</code>…<code>{9}</code>
+                <code>{count}</code> <code>{random:1-100}</code> <code>{pick:sí|no}</code> <code>{uptime}</code>
+                <code>{game}</code> <code>{title}</code>. Ej.: <code>{user} abraza a {touser} 🤗</code>
+            </p>
         </div>
     </div>
 
@@ -58,16 +79,17 @@
                 <table class="table">
                     <thead>
                         <tr>
-                            <th style="width: 20%;">Comando</th>
-                            <th style="width: 35%;">Respuesta</th>
-                            <th style="width: 12%;">Cooldown</th>
-                            <th style="width: 23%;">Creado</th>
-                            <th style="width: 10%;">Acción</th>
+                            <th style="width: 16%;">Comando</th>
+                            <th style="width: 38%;">Respuesta</th>
+                            <th style="width: 14%;">Quién</th>
+                            <th style="width: 14%;">Cooldown</th>
+                            <th style="width: 10%;">Usos</th>
+                            <th style="width: 8%;">Acción</th>
                         </tr>
                     </thead>
                     <tbody id="commands-list">
                         <tr>
-                            <td colspan="5" class="text-center">
+                            <td colspan="6" class="text-center">
                                 <span style="color: var(--text-muted);"><i class="fas fa-spinner fa-spin"></i> Cargando comandos...</span>
                             </td>
                         </tr>
@@ -185,7 +207,7 @@
                 if (!commands || commands.length === 0) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="5" class="text-center" style="color: var(--text-muted); padding: 24px;">
+                            <td colspan="6" class="text-center" style="color: var(--text-muted); padding: 24px;">
                                 <i class="fas fa-inbox" style="font-size: 24px; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
                                 No hay comandos personalizados
                             </td>
@@ -196,29 +218,33 @@
                 }
 
                 count.textContent = commands.length;
-                tbody.innerHTML = commands.map(cmd => `
+                const LEVELS = { everyone: 'Todos', sub: 'Subs', vip: 'VIP', mod: 'Mods', owner: 'Streamer' };
+                tbody.innerHTML = commands.map(cmd => {
+                    const name = escapeHtml(cmd.name);
+                    const response = cmd.response.length > 80 ? cmd.response.substring(0, 80) + '…' : cmd.response;
+                    const userCd = cmd.user_cooldown ? ` <small>· ${cmd.user_cooldown}s/usuario</small>` : '';
+                    return `
                     <tr>
-                        <td><strong style="color: var(--accent);">!${cmd.name}</strong></td>
-                        <td style="color: var(--text-secondary);">
-                            ${cmd.response.length > 60 ? cmd.response.substring(0, 60) + '…' : cmd.response}
+                        <td><strong style="color: var(--accent);">!${name}</strong></td>
+                        <td style="color: var(--text-secondary); word-break: break-word;" title="${escapeHtml(cmd.response)}">
+                            ${escapeHtml(response)}
                         </td>
-                        <td style="color: var(--text-muted);">${cmd.cooldown}s</td>
-                        <td style="color: var(--text-muted); font-size: 13px;">
-                            ${cmd.created_at ? new Date(cmd.created_at).toLocaleString() : '—'}
-                        </td>
+                        <td style="color: var(--text-muted);">${LEVELS[cmd.level] || 'Todos'}</td>
+                        <td style="color: var(--text-muted);">${cmd.cooldown}s${userCd}</td>
+                        <td style="color: var(--text-muted);">${cmd.count || 0}</td>
                         <td>
-                            <button class="btn-danger btn-sm" onclick="deleteCommand('${cmd.name}')" title="Eliminar comando">
+                            <button class="btn-danger btn-sm" onclick="deleteCommand('${name}')" title="Eliminar comando">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </td>
-                    </tr>
-                `).join('');
+                    </tr>`;
+                }).join('');
             })
             .catch(err => {
                 console.error('Error cargando comandos:', err);
                 document.getElementById('commands-list').innerHTML = `
                     <tr>
-                        <td colspan="5" class="text-center" style="color: var(--danger); padding: 24px;">
+                        <td colspan="6" class="text-center" style="color: var(--danger); padding: 24px;">
                             <i class="fas fa-exclamation-triangle"></i> Error al cargar comandos
                         </td>
                     </tr>
@@ -232,7 +258,7 @@
     async function deleteCommand(name) {
         const confirmed = await showModal(
             '⚠️ Confirmar eliminación',
-            `¿Estás seguro de eliminar el comando <strong>!${name}</strong>? Esta acción no se puede deshacer.`,
+            `¿Estás seguro de eliminar el comando <strong>!${escapeHtml(name)}</strong>? Esta acción no se puede deshacer.`,
             'Eliminar',
             'Cancelar',
             'danger'
@@ -264,6 +290,8 @@
         const name = document.getElementById('cmd-name').value.trim();
         const response = document.getElementById('cmd-response').value.trim();
         const cooldown = parseInt(document.getElementById('cmd-cooldown').value) || 0;
+        const user_cooldown = parseInt(document.getElementById('cmd-user-cooldown').value) || 0;
+        const level = document.getElementById('cmd-level').value;
 
         if (!name || !response) {
             showToast('Nombre y respuesta son requeridos', 'error');
@@ -277,7 +305,7 @@
         fetch('/api/commands', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, response, cooldown })
+            body: JSON.stringify({ name, response, cooldown, user_cooldown, level })
         })
             .then(res => res.json())
             .then(data => {
@@ -288,6 +316,8 @@
                     document.getElementById('cmd-name').value = '';
                     document.getElementById('cmd-response').value = '';
                     document.getElementById('cmd-cooldown').value = '0';
+                    document.getElementById('cmd-user-cooldown').value = '0';
+                    document.getElementById('cmd-level').value = 'everyone';
                     loadCommands();
                 }
             })

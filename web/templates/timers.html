@@ -1,0 +1,283 @@
+{% extends "base.html" %}
+
+{% block title %}VesperBot — Timers{% endblock %}
+{% block header %}Timers{% endblock %}
+
+{% block content %}
+
+<div class="dashboard-grid single-col">
+
+    <!-- ========== CREAR / EDITAR TIMER ========== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <i class="fas fa-stopwatch"></i>
+                <h3 id="timer-form-title">Nuevo timer</h3>
+            </div>
+        </div>
+        <div class="card-body">
+            <p class="text-muted page-hint">
+                El bot envía el mensaje cada cierto tiempo, <strong>solo con el directo en vivo</strong> y
+                si han llegado suficientes mensajes al chat desde el último envío (así no habla solo).
+            </p>
+            <form id="timer-form" class="timer-form">
+                <div class="form-group">
+                    <label for="timer-name"><i class="fas fa-tag"></i> Nombre</label>
+                    <input type="text" id="timer-name" class="form-control" placeholder="ej: discord" maxlength="25" required>
+                </div>
+                <div class="form-group">
+                    <label for="timer-interval"><i class="fas fa-clock"></i> Cada (minutos)</label>
+                    <input type="number" id="timer-interval" class="form-control" value="15" min="5" max="1440" required>
+                </div>
+                <div class="form-group">
+                    <label for="timer-lines"><i class="fas fa-comments"></i> Mensajes mínimos en el chat</label>
+                    <input type="number" id="timer-lines" class="form-control" value="5" min="0" max="500" required>
+                </div>
+                <div class="form-group form-group-wide">
+                    <label for="timer-message"><i class="fas fa-comment"></i> Mensaje</label>
+                    <textarea id="timer-message" class="form-control" rows="2" maxlength="500"
+                              placeholder="🕯️ ¡Únete a nuestro Discord! https://discord.gg/..." required></textarea>
+                    <span class="char-count"><span id="timer-chars">0</span>/500</span>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" id="timer-cancel" hidden>Cancelar</button>
+                    <button type="submit" class="btn-primary" id="timer-submit">
+                        <i class="fas fa-plus"></i> Crear timer
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ========== LISTA ========== -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-header-left">
+                <i class="fas fa-list"></i>
+                <h3>Timers guardados</h3>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="badge" id="timer-count">0</span>
+                <button onclick="loadTimers()" class="btn-icon btn-sm" title="Refrescar">
+                    <i class="fas fa-sync"></i>
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="table-wrapper">
+                <table class="table timers-table">
+                    <thead>
+                        <tr>
+                            <th>Activo</th>
+                            <th>Nombre</th>
+                            <th>Mensaje</th>
+                            <th>Frecuencia</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="timers-list">
+                        <tr><td colspan="5" class="text-center text-muted" style="padding: 24px;">Cargando…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-muted page-hint" style="margin-top: 12px;">
+                También puedes gestionarlos desde el chat con <code>!timer add|remove|on|off|list</code>.
+            </p>
+        </div>
+    </div>
+</div>
+
+<style>
+    .dashboard-grid.single-col { grid-template-columns: 1fr; }
+    .page-hint { font-size: 13px; margin: 0 0 16px; line-height: 1.5; }
+    .timer-form {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr;
+        gap: 16px;
+        align-items: end;
+    }
+    .timer-form .form-group { margin: 0; }
+    .form-group-wide { grid-column: 1 / -1; position: relative; }
+    .form-group-wide textarea { resize: vertical; min-height: 60px; font-family: inherit; }
+    .char-count { position: absolute; right: 10px; bottom: 8px; font-size: 11px; color: var(--text-muted); }
+    .form-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 10px; }
+    .timer-msg { color: var(--text-secondary); word-break: break-word; max-width: 520px; }
+    .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
+    tr.is-paused td { opacity: 0.55; }
+    tr.is-paused td:first-child { opacity: 1; }
+    /* .btn-secondary fija display y anulaba el atributo hidden */
+    .timer-form [hidden] { display: none !important; }
+    @media (max-width: 768px) {
+        .timer-form { grid-template-columns: 1fr; }
+        /* En móvil cada timer se muestra como una tarjeta */
+        .timers-table thead { display: none; }
+        .timers-table tr {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 8px 12px;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+        }
+        .timers-table td { padding: 0; border: none; }
+        .timers-table td:nth-child(1) { grid-row: 1; grid-column: 1; }
+        .timers-table td:nth-child(2) { grid-row: 1; grid-column: 2; }
+        .timers-table td:nth-child(5) { grid-row: 1; grid-column: 3; }
+        .timers-table td:nth-child(3) { grid-row: 2; grid-column: 1 / -1; max-width: none; }
+        .timers-table td:nth-child(4) { grid-row: 3; grid-column: 1 / -1; white-space: normal; }
+        .timers-table td:nth-child(4) br { display: none; }
+        .timers-table tr:hover td { background: transparent; }
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let timersCache = [];
+    let editingTimer = null;
+
+    function renderTimers() {
+        const tbody = document.getElementById('timers-list');
+        document.getElementById('timer-count').textContent = timersCache.length;
+
+        if (!timersCache.length) {
+            tbody.innerHTML = `
+                <tr><td colspan="5" class="text-center text-muted" style="padding: 24px;">
+                    <i class="fas fa-inbox" style="font-size: 24px; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
+                    Aún no hay timers. Crea el primero arriba.
+                </td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = timersCache.map(t => {
+            const name = escapeHtml(t.name);
+            return `
+            <tr class="${t.enabled ? '' : 'is-paused'}">
+                <td>
+                    <label class="switch" title="${t.enabled ? 'Pausar' : 'Activar'}">
+                        <input type="checkbox" ${t.enabled ? 'checked' : ''} onchange="toggleTimer('${name}', this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </td>
+                <td><strong style="color: var(--accent);">${name}</strong></td>
+                <td class="timer-msg">${escapeHtml(t.message)}</td>
+                <td class="text-muted" style="white-space: nowrap;">
+                    cada ${t.interval} min<br><small> · ${t.min_lines} mensajes mín.</small>
+                </td>
+                <td>
+                    <div class="row-actions">
+                        <button class="btn-icon btn-sm" onclick="editTimer('${name}')" title="Editar">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        <button class="btn-danger btn-sm" onclick="deleteTimer('${name}')" title="Eliminar">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+    }
+
+    function loadTimers() {
+        fetch('/api/timers')
+            .then(res => { if (!res.ok) throw new Error(); return res.json(); })
+            .then(data => { timersCache = data; renderTimers(); })
+            .catch(() => {
+                document.getElementById('timers-list').innerHTML =
+                    '<tr><td colspan="5" class="text-center" style="color: var(--danger); padding: 24px;">Error al cargar los timers</td></tr>';
+            });
+    }
+
+    function resetForm() {
+        editingTimer = null;
+        document.getElementById('timer-form').reset();
+        document.getElementById('timer-name').disabled = false;
+        document.getElementById('timer-chars').textContent = '0';
+        document.getElementById('timer-form-title').textContent = 'Nuevo timer';
+        document.getElementById('timer-submit').innerHTML = '<i class="fas fa-plus"></i> Crear timer';
+        document.getElementById('timer-cancel').hidden = true;
+    }
+
+    function editTimer(name) {
+        const t = timersCache.find(x => x.name === name);
+        if (!t) return;
+        editingTimer = name;
+        document.getElementById('timer-name').value = t.name;
+        document.getElementById('timer-name').disabled = true;
+        document.getElementById('timer-interval').value = t.interval;
+        document.getElementById('timer-lines').value = t.min_lines;
+        document.getElementById('timer-message').value = t.message;
+        document.getElementById('timer-chars').textContent = t.message.length;
+        document.getElementById('timer-form-title').textContent = `Editar timer «${t.name}»`;
+        document.getElementById('timer-submit').innerHTML = '<i class="fas fa-save"></i> Guardar cambios';
+        document.getElementById('timer-cancel').hidden = false;
+        document.getElementById('timer-message').focus();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function toggleTimer(name, enabled) {
+        fetch(`/api/timers/${encodeURIComponent(name)}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) showToast(data.error, 'error'); else showToast(data.message, 'success');
+                loadTimers();
+            })
+            .catch(() => { showToast('Error al cambiar el timer', 'error'); loadTimers(); });
+    }
+
+    async function deleteTimer(name) {
+        const ok = await showModal('⚠️ Eliminar timer',
+            `¿Eliminar el timer <strong>${escapeHtml(name)}</strong>?`, 'Eliminar', 'Cancelar', 'danger');
+        if (!ok) return;
+        fetch(`/api/timers/${encodeURIComponent(name)}`, { method: 'DELETE' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) { showToast(data.error, 'error'); return; }
+                showToast(data.message, 'success');
+                if (editingTimer === name) resetForm();
+                loadTimers();
+            })
+            .catch(() => showToast('Error al eliminar el timer', 'error'));
+    }
+
+    document.getElementById('timer-message').addEventListener('input', e => {
+        document.getElementById('timer-chars').textContent = e.target.value.length;
+    });
+    document.getElementById('timer-cancel').addEventListener('click', resetForm);
+
+    document.getElementById('timer-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        const payload = {
+            name: document.getElementById('timer-name').value.trim().toLowerCase(),
+            interval: parseInt(document.getElementById('timer-interval').value, 10),
+            min_lines: parseInt(document.getElementById('timer-lines').value, 10),
+            message: document.getElementById('timer-message').value.trim()
+        };
+        const btn = document.getElementById('timer-submit');
+        const original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando…';
+
+        fetch('/api/timers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) { showToast(data.error, 'error'); return; }
+                showToast(data.message, 'success');
+                resetForm();
+                loadTimers();
+            })
+            .catch(() => showToast('Error al guardar el timer', 'error'))
+            .finally(() => { btn.disabled = false; if (btn.innerHTML.includes('Guardando')) btn.innerHTML = original; });
+    });
+
+    document.addEventListener('DOMContentLoaded', loadTimers);
+</script>
+{% endblock %}

@@ -55,8 +55,28 @@ class Bot(commands.Bot):
         # Registrar callback para cambios en config_service
         config_service.on_change(self._on_config_change)
 
+        # Mantener al día el token de la conexión al chat
+        token_manager.on_token_refreshed(self._on_token_refreshed)
+
         logger.info("✅ Relicario despertado correctamente")
         log_service.add_log('info', 'Relicario despertado correctamente', 'bot')
+
+    def _on_token_refreshed(self, token_type, access_token: str):
+        """
+        twitchio guarda el token del arranque y lo reutiliza al reconectarse al
+        chat; si ya caducó (a las ~4 h) la reconexión fallaba con
+        "Login unsuccessful". Aquí se le pasa el token nuevo.
+        """
+        if getattr(token_type, "value", token_type) not in ("bot", "moderator"):
+            return
+        token = access_token[6:] if access_token.startswith("oauth:") else access_token
+        connection = getattr(self, "_connection", None)
+        if connection is not None:
+            connection._token = token
+        http = getattr(self, "_http", None)
+        if http is not None:
+            http.token = token
+        logger.info("🔑 Token del chat actualizado para futuras reconexiones")
 
     def _load_custom_commands(self):
         custom_commands = config_service.get_custom_commands()

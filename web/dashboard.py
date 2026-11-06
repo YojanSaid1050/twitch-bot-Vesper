@@ -1691,3 +1691,7 @@ def run_dashboard(port=None):
     app.config['START_TIME'] = datetime.now()
     logger.info(f"🚀 Iniciando servidor dashboard en el puerto {port}")
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+# Rutas adicionales (se registran sobre la misma app)
+import web.connections  # noqa: E402,F401
+import web.community  # noqa: E402,F401
